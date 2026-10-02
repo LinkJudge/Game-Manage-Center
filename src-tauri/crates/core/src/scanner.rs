@@ -189,7 +189,38 @@ pub fn is_protected_root(path: &str, platform: Platform, home: &Path) -> bool {
     })
 }
 
-/// 单游戏完整解析（对应 process_game：文件桶按当前平台，reg 桶仅 Windows）
+/// 合并规则（SPEC §3）：一条解析路径是另一条的子目录（或与另一条相同）时丢弃，
+/// 只保留父目录——数据库常给同一游戏同时登记父目录与子目录模板
+/// （如 Dying Light 的 `userdata\<uid>\239140\` 与 `...\239140\remote\out\`），
+/// 不去重会导致子路径内容被备份两次、大小重复计入。
+/// Windows 路径大小写不敏感，比较前统一小写并去掉尾分隔符。
+fn dedup_subpaths(paths: &mut Vec<ResolvedPath>) {
+    if paths.len() < 2 {
+        return;
+    }
+    let norm = |p: &str| {
+        p.replace('/', "\\")
+            .to_lowercase()
+            .trim_end_matches('\\')
+            .to_string()
+    };
+    // 短路径在前，保证父目录先入 kept、子路径随后被支配判定命中
+    paths.sort_by(|a, b| {
+        let (na, nb) = (norm(&a.resolved), norm(&b.resolved));
+        na.len().cmp(&nb.len()).then_with(|| na.cmp(&nb))
+    });
+    let mut kept: Vec<(String, ResolvedPath)> = Vec::with_capacity(paths.len());
+    for p in paths.drain(..) {
+        let n = norm(&p.resolved);
+        let dominated = kept.iter().any(|(k, _)| n == *k || n.starts_with(&format!("{k}\\")));
+        if !dominated {
+            kept.push((n, p));
+        }
+    }
+    *paths = kept.into_iter().map(|(_, p)| p).collect();
+}
+
+/// 单游戏完整解析：文件桶按当前平台，reg 桶仅 Windows
 pub fn scan_game(
     entry: &GameEntry,
     env: &DetectedEnvironment,
@@ -226,6 +257,8 @@ pub fn scan_game(
         Platform::MacOS => (&entry.paths.mac, &entry.paths.mac_kinds),
         Platform::Linux => (&entry.paths.linux, &entry.paths.linux_kinds),
     };
+    // 先收集全部模板的解析结果，再合并（大小统计必须在去重之后，否则子路径重复计入）
+    let mut candidates: Vec<ResolvedPath> = Vec::new();
     for (idx, template) in bucket.iter().enumerate() {
         // 类型与路径数组平行（saves/config），缺失时按存档兜底
         let content_kind = kinds.get(idx).cloned().unwrap_or_else(|| "saves".to_string());
@@ -235,14 +268,18 @@ pub fn scan_game(
                 continue;
             }
             resolved.content_kind = content_kind.clone();
-            let (size, modified) = walk_size(Path::new(&resolved.resolved));
-            if size > 0 {
-                backup_size += size;
-                if modified.is_some_and(|m| latest_modified_ms.is_none_or(|l| m > l)) {
-                    latest_modified_ms = modified;
-                }
-                resolved_files.push(resolved);
+            candidates.push(resolved);
+        }
+    }
+    dedup_subpaths(&mut candidates);
+    for resolved in candidates {
+        let (size, modified) = walk_size(Path::new(&resolved.resolved));
+        if size > 0 {
+            backup_size += size;
+            if modified.is_some_and(|m| latest_modified_ms.is_none_or(|l| m > l)) {
+                latest_modified_ms = modified;
             }
+            resolved_files.push(resolved);
         }
     }
 
@@ -331,6 +368,10 @@ pub fn quick_scan(
             games.push(scan_game(&entry, env, home, all_accounts));
         }
     }
+
+    // 兜底匹配可能与主匹配命中同一游戏（另一目录名恰好等于其标题），按 id 去重保序
+    let mut seen_ids: std::collections::HashSet<i64> = std::collections::HashSet::new();
+    games.retain(|g| seen_ids.insert(g.entry.wiki_page_id));
 
     // 自定义游戏（负数 id）：直接按用户提供的路径扫描
     for custom in customs {
@@ -495,13 +536,24 @@ mod tests {
             with_files,
             with_reg
         );
-        for game in output.games.iter().filter(|g| !g.resolved_files.is_empty()).take(10) {
+        for game in output.games.iter().filter(|g| !g.resolved_files.is_empty()) {
             println!(
                 "  - {} ({} | {}) {}",
                 game.entry.title,
                 game.entry.zh_cn.as_deref().unwrap_or("-"),
                 format_bytes(game.backup_size),
                 game.resolved_files.first().map(|r| r.resolved.clone()).unwrap_or_default()
+            );
+            for r in game.resolved_files.iter().skip(1) {
+                println!("      + {}", r.resolved);
+            }
+        }
+        // 命中安装但没解析出任何文件的：安装检测对、存档模板失败，诊断专用
+        for game in output.games.iter().filter(|g| g.resolved_files.is_empty() && g.registry_candidates.is_empty()) {
+            println!(
+                "  ? {}（install: {:?}，模板全部未命中）",
+                game.entry.title,
+                game.install_path.as_deref().unwrap_or("?")
             );
         }
         for game in output.games.iter().filter(|g| !g.registry_candidates.is_empty()).take(5) {
@@ -518,6 +570,32 @@ mod tests {
         if bytes < 1024 * 1024 { return format!("{:.1} KB", bytes as f64 / 1024.0); }
         if bytes < 1024 * 1024 * 1024 { return format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0)); }
         format!("{:.2} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+    }
+
+    #[test]
+    fn dedup_subpaths_drops_child_and_duplicates() {
+        // 数据库真实案例：Dying Light 同时登记父目录 239140\ 与子目录 ...\239140\remote\out\，
+        // 子路径不去重会双份备份、大小双计（SPEC §3）
+        let mk = |resolved: &str, kind: &str| ResolvedPath {
+            template: resolved.into(),
+            final_template: resolved.into(),
+            resolved: resolved.into(),
+            kind: crate::resolve::ResolvedKind::File,
+            content_kind: kind.into(),
+        };
+        let mut paths = vec![
+            mk(r"C:\U\239140\remote\out", "saves"),
+            mk(r"C:\u\239140", "saves"),           // 父目录（大小写不同）
+            mk(r"C:\U\239140\remote\out\", "saves"), // 子路径 + 尾分隔符（等价于第一条）
+        ];
+        dedup_subpaths(&mut paths);
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0].resolved, r"C:\u\239140"); // 保留父目录
+
+        // 无包含关系的多条路径互不影响
+        let mut paths = vec![mk(r"C:\A", "saves"), mk(r"C:\B", "config")];
+        dedup_subpaths(&mut paths);
+        assert_eq!(paths.len(), 2);
     }
 
     #[test]

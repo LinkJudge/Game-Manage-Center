@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Game Manager",
-  "version": "0.1.0",
-  "identifier": "com.gamemanager.app",
+  "productName": "Game Manage Center",
+  "version": "0.2.0",
+  "identifier": "com.gamemanagecenter.app",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Game Manager",
+        "title": "Game Manage Center",
         "width": 1280,
         "height": 800,
         "minWidth": 960,
@@ -30,12 +30,16 @@
     "windows": {
       "nsis": {
         "installMode": "both",
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico",
         "languages": ["SimpChinese", "English"],
         "displayLanguageSelector": false
       }
     },
     "resources": [
-      "resources/database.db"
+      "resources/database.db",
+      "resources/trainers",
+      "resources/bin"
     ],
     "icon": [
       "icons/32x32.png",

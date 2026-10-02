@@ -177,6 +177,19 @@ impl Database {
             .map(|rows| rows.into_iter().map(game_entry_from_row).collect())
     }
 
+    /// 全库 (title, zh_CN) 对，供修改器模块构建中文名索引（trainers::ZhNameIndex）。
+    /// 无中文名的游戏也会返回（zh 为 None，索引侧自行过滤）。
+    pub fn title_zh_pairs(&self) -> Result<Vec<(String, Option<String>)>, String> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT title, zh_CN FROM games")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    }
+
     /// 按游戏标题匹配（EA/R星等 install_folder 缺失时的兜底，目录名≈标题）
     pub fn list_games_by_titles(&self, titles: &[&str]) -> Result<Vec<GameEntry>, String> {
         if titles.is_empty() {

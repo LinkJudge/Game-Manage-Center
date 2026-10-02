@@ -107,30 +107,34 @@ fn lex_segments(template: &str) -> Vec<Vec<Piece>> {
     let mut i = 0usize;
 
     while i < b.len() {
-        // {{p|xxx}} 变量
-        if b[i] == b'{'
-            && i + 1 < b.len()
-            && b[i + 1] == b'{'
-            && template[i..].starts_with("{{p|")
-        {
-            if let Some(rel) = template[i + 4..].find("}}") {
-                let raw = &template[i + 4..i + 4 + rel];
-                let name = paths::normalize(raw);
-                if !text.is_empty() {
-                    segs.last_mut().unwrap().push(Piece::Text(std::mem::take(&mut text)));
+        // {{p|xxx}} 路径变量——库数据同时存在 {{p| 与 {{P|（以及 {{path| 变体），
+        // 标记部分不区分大小写（wiki 数据 ~1/3 条目用大写形态）
+        if b[i] == b'{' && i + 1 < b.len() && b[i + 1] == b'{' {
+            let head = &template[i + 2..];
+            if let Some(pipe) = head.find('|') {
+                let marker = head[..pipe].to_ascii_lowercase();
+                if marker == "p" || marker == "path" {
+                    let content_start = i + 2 + pipe + 1;
+                    if let Some(end) = template[content_start..].find("}}") {
+                        let raw = &template[content_start..content_start + end];
+                        let name = paths::normalize(raw);
+                        if !text.is_empty() {
+                            segs.last_mut().unwrap().push(Piece::Text(std::mem::take(&mut text)));
+                        }
+                        segs.last_mut().unwrap().push(match name.as_str() {
+                            "uid" => Piece::Uid,
+                            "game" => Piece::Ctx("game"),
+                            "steam" => Piece::Ctx("steam"),
+                            "uplay" | "ubisoftconnect" => Piece::Ctx("ubisoft"),
+                            "hkcu" => Piece::Reg("hkcu".into()),
+                            "hklm" => Piece::Reg("hklm".into()),
+                            "wow64" => Piece::Reg("wow64".into()),
+                            other => Piece::Var(other.to_string()),
+                        });
+                        i = content_start + end + 2;
+                        continue;
+                    }
                 }
-                segs.last_mut().unwrap().push(match name.as_str() {
-                    "uid" => Piece::Uid,
-                    "game" => Piece::Ctx("game"),
-                    "steam" => Piece::Ctx("steam"),
-                    "uplay" | "ubisoftconnect" => Piece::Ctx("ubisoft"),
-                    "hkcu" => Piece::Reg("hkcu".into()),
-                    "hklm" => Piece::Reg("hklm".into()),
-                    "wow64" => Piece::Reg("wow64".into()),
-                    other => Piece::Var(other.to_string()),
-                });
-                i += 4 + rel + 2;
-                continue;
             }
         }
         // 通配
@@ -563,5 +567,38 @@ mod tests {
             Piece::Text(t) => assert_eq!(t, ".sav"),
             other => panic!("unexpected piece: {other:?}"),
         }
+    }
+
+    #[test]
+    fn placeholder_marker_is_case_insensitive() {
+        // 回归：库数据 ~1/3 条目用大写 {{P|（GTA V / RDR2 / 只狼等），
+        // 词法器曾只认小写导致这批游戏存档全部无法解析
+        let dir = std::env::temp_dir().join(format!("gm-case-{}", std::process::id()));
+        let game_dir = dir.join("Sekiro");
+        std::fs::create_dir_all(&game_dir).unwrap();
+        std::fs::write(game_dir.join("GraphicsConfig.xml"), b"x").unwrap();
+
+        let ctx = ResolveContext {
+            game_dir: Some(game_dir.to_string_lossy().to_string()),
+            ..base_ctx()
+        };
+        // {{P|...}} 大写形态
+        let out = resolve_template(r"{{P|game}}\GraphicsConfig.xml", &ctx);
+        assert_eq!(out.len(), 1, "大写 {{P| 必须被识别");
+        // {{Path|...}} 变体
+        let out = resolve_template(r"{{Path|game}}\GraphicsConfig.xml", &ctx);
+        assert_eq!(out.len(), 1, "{{Path| 变体必须被识别");
+        // 同一模板内大小写混用（真实数据形态）：词法层断言两个占位符都被识别
+        let segs = lex_segments(r"{{p|game}}\{{P|uid}}\save.dat");
+        let flat: Vec<&Piece> = segs.iter().flatten().collect();
+        assert!(
+            flat.iter().any(|p| matches!(p, Piece::Ctx("game"))),
+            "小写 {{p| 必须识别"
+        );
+        assert!(
+            flat.iter().any(|p| matches!(p, Piece::Uid)),
+            "大写 {{P|uid}} 必须识别"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

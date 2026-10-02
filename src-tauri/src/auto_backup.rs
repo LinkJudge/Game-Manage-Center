@@ -113,8 +113,8 @@ pub fn manager() -> &'static Mutex<AutoBackupManager> {
 /// 单次自动备份：现场解析存档路径 → 备份（与手动备份共用同一引擎）
 pub fn run_once(
     wiki_page_id: i64,
-    db_path: &PathBuf,
-    backups_root: &PathBuf,
+    db_path: &Path,
+    backups_root: &Path,
     max_backups: u32,
     compress: bool,
 ) -> Result<(), String> {

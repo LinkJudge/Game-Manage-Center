@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BackupTab } from "@/backupTab";
 import { RestoreTab } from "@/restoreTab";
+import { TrainersTab } from "@/trainersTab";
 import { SettingsDialog } from "@/settingsDialog";
 import { useScanStore } from "@/store";
 
@@ -49,7 +50,7 @@ function App() {
           {/* 第一行：品牌名居左（macOS 版红绿灯按钮的预留位），窗口控制居右 */}
           <div className="flex h-9 items-start justify-between px-2" data-tauri-drag-region>
             <span className="pl-3 pt-1 text-xs font-medium text-muted-foreground" data-tauri-drag-region>
-              Game Manager
+              Game Manage Center
             </span>
             <div className="flex items-center">
               <button
@@ -91,9 +92,7 @@ function App() {
               </TabsTrigger>
               <TabsTrigger
                 value="trainers"
-                disabled
-                title="规划中：修改器的管理、更新与一站式启动"
-                className="gap-1.5 rounded-full px-5"
+                className="gap-1.5 rounded-full px-5 data-[state=active]:bg-background data-[state=active]:shadow-sm"
               >
                 <Gamepad2 className="size-4" />
                 修改器
@@ -155,8 +154,20 @@ function App() {
           </Tabs>
         </TabsContent>
 
-        {/* 预留模块占位（标签禁用中，实现后自动启用） */}
-        <TabsContent value="trainers" className="min-h-0 flex-1" />
+        {/* 修改器模块：目录搜索 + 一键下载安装 */}
+        {/* 修改器模块：目录搜索 + 一键下载安装（标题区/内容区间距与存档页同构，含二级 Tabs 的 gap-2） */}
+        <TabsContent value="trainers" className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
+          <div className="px-6 pb-1 pt-4">
+            <h1 className="text-2xl font-semibold tracking-tight">修改器</h1>
+            <p className="text-xs text-muted-foreground">
+              一键下载安装单机游戏修改器 —— 与本机游戏库联动，多来源持续接入
+            </p>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-6 pt-3">
+            <TrainersTab />
+          </div>
+        </TabsContent>
+        {/* MOD 模块占位（规划中） */}
         <TabsContent value="mods" className="min-h-0 flex-1" />
       </Tabs>
     </main>

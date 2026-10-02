@@ -22,6 +22,8 @@ pub struct AppSettings {
     pub auto_backup_enabled: bool,
     /// 关闭主窗口后进入托盘（true，默认）还是直接退出（false）
     pub close_to_tray: bool,
+    /// 修改器安装根目录；None = 默认（应用数据目录/Trainers）
+    pub trainer_path: Option<String>,
 }
 
 impl Default for AppSettings {
@@ -34,6 +36,7 @@ impl Default for AppSettings {
             auto_backup_enabled: false,
             // 默认关窗进托盘（自动备份常驻）
             close_to_tray: true,
+            trainer_path: None,
         }
     }
 }
@@ -98,6 +101,7 @@ mod tests {
             compress_backups: true,
             auto_backup_enabled: true,
             close_to_tray: false,
+            trainer_path: Some("D:\\MyTrainers".into()),
         };
         settings.save(&path).unwrap();
 
@@ -107,6 +111,7 @@ mod tests {
         assert!(loaded.compress_backups);
         assert!(loaded.auto_backup_enabled);
         assert!(!loaded.close_to_tray);
+        assert_eq!(loaded.trainer_path.as_deref(), Some("D:\\MyTrainers"));
         let _ = std::fs::remove_file(&path);
     }
 }

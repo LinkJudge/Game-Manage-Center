@@ -1,4 +1,4 @@
-//! gm-core — Game Manager 核心业务逻辑
+//! gm-core — Game Manage Center 核心业务逻辑
 //!
 //! 占位符/模板语义以 PCGamingWiki 数据库字段格式为准，每条规则配套单元测试。
 
@@ -20,6 +20,7 @@ pub mod resolve;
 pub mod restore;
 pub mod scanner;
 pub mod settings;
+pub mod trainers;
 pub mod vdf;
 
 /// 从游戏标题生成 Steam/GOG 安装目录名的兜底推断：

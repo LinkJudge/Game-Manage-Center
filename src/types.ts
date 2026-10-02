@@ -115,7 +115,7 @@ export interface RestoreResult {
   errors: string[];
 }
 
-export interface AppSettings { backupPath: string | null; maxBackups: number; compressBackups: boolean; autoBackupEnabled: boolean; closeToTray: boolean; }
+export interface AppSettings { backupPath: string | null; maxBackups: number; compressBackups: boolean; autoBackupEnabled: boolean; closeToTray: boolean; trainerPath: string | null; }
 
 
 export interface BatchResult {
@@ -127,3 +127,86 @@ export interface BatchResult {
 
 export interface CustomPath { kind: string; path: string; }
 export interface CustomGame { id: number; name: string; paths: CustomPath[]; }
+
+// ---------------------------------------------------------------- 修改器模块
+
+export interface TrainerSourceSummary {
+  id: string;
+  title: string;
+  homepage: string;
+  count: number;
+}
+
+export interface TrainerHit {
+  sourceId: string;
+  id: string;
+  gameName: string;
+  zhName: string | null;
+  pageUrl: string;
+  updatedAt: string | null;
+  optionsCount: number | null;
+  gameVersion: string | null;
+  downloadUrl: string | null;
+  sizeBytes: number | null;
+  downloadCount: number | null;
+  totalDownloads: number;
+}
+
+export interface TrainerGameQuery {
+  title: string;
+  zhName: string | null;
+}
+
+export interface GameTrainerMatch {
+  title: string;
+  zhName: string | null;
+  matches: TrainerHit[];
+}
+
+export interface TrainerManifest {
+  schema: string;
+  trainerId: string;
+  sourceId: string;
+  gameName: string;
+  zhName: string | null;
+  file: string;
+  downloadUrl: string;
+  pageUrl: string;
+  dateAdded: string | null;
+  gameVersion: string | null;
+  optionsCount: number | null;
+  sizeBytes: number | null;
+  installedAt: string;
+  primaryExe: string | null;
+  files: string[];
+}
+
+export interface InstalledTrainer {
+  manifest: TrainerManifest;
+  folder: string;
+}
+
+export interface TrainerDownload {
+  file: string;
+  url: string;
+  dateAdded: string | null;
+  sizeBytes: number | null;
+  downloadCount: number | null;
+  gameVersion: string | null;
+  optionsCount: number | null;
+}
+
+export interface TrainerUpdateInfo {
+  trainerId: string;
+  gameName: string;
+  zhName: string | null;
+  oldFolder: string;
+  newDownload: TrainerDownload;
+}
+
+export interface TrainerProgress {
+  trainerId: string;
+  stage: "download" | "extract" | "done";
+  downloaded: number;
+  total: number;
+}

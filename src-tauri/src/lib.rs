@@ -1,7 +1,7 @@
 ﻿mod auto_backup;
 
 use gm_core::settings::AppSettings;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -12,6 +12,10 @@ pub struct AppState {
     pub settings_path: PathBuf,
     pub app_data_dir: PathBuf,
     pub custom_games_path: PathBuf,
+    /// 修改器目录注册表（启动装载；目录在线更新后整体替换）
+    pub trainers: std::sync::RwLock<gm_core::trainers::TrainerRegistry>,
+    /// 修改器中文名索引（来自游戏库 title→zh_CN，启动时构建，只读）
+    pub trainer_zh: gm_core::trainers::ZhNameIndex,
 }
 
 impl AppState {
@@ -82,6 +86,19 @@ fn database_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Err("找不到数据库文件（resources/database.db）".to_string())
 }
 
+/// 定位修改器目录资源（resources/trainers，每来源一份 catalog JSON）
+fn trainers_dir(app: &tauri::AppHandle) -> PathBuf {
+    use tauri::Manager;
+    if let Ok(dir) = app.path().resource_dir() {
+        for candidate in [dir.join("resources/trainers"), dir.join("trainers")] {
+            if candidate.is_dir() {
+                return candidate;
+            }
+        }
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/trainers")
+}
+
 fn home_dir() -> PathBuf {
     std::env::var_os("USERPROFILE")
         .or_else(|| std::env::var_os("HOME"))
@@ -98,11 +115,411 @@ fn list_modules() -> Vec<gm_core::module::ModuleInfo> {
     gm_core::module::modules()
 }
 
+// ======================================================================
+// 修改器命令（目录检索与游戏匹配；下载/安装后续接入）
+// ======================================================================
+
+/// 来源元信息摘要（list_trainer_sources 返回）
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrainerSourceSummary {
+    pub id: String,
+    pub title: String,
+    pub homepage: String,
+    pub count: usize,
+}
+
+#[tauri::command]
+fn list_trainer_sources(state: tauri::State<AppState>) -> Vec<TrainerSourceSummary> {
+    state
+        .trainers
+        .read()
+        .unwrap()
+        .source_infos()
+        .into_iter()
+        .map(|(info, count)| TrainerSourceSummary {
+            id: info.id,
+            title: info.title,
+            homepage: info.homepage,
+            count,
+        })
+        .collect()
+}
+
+#[tauri::command]
+fn search_trainers(
+    state: tauri::State<AppState>,
+    query: String,
+    limit: Option<u32>,
+) -> Vec<gm_core::trainers::TrainerHit> {
+    state
+        .trainers
+        .read()
+        .unwrap()
+        .search(&query, &state.trainer_zh, limit.unwrap_or(50).clamp(1, 200) as usize)
+}
+
+/// 游戏匹配查询输入：前端把扫描到的游戏（标题 + 可选中文名）传回来
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrainerGameQuery {
+    pub title: String,
+    #[serde(default)]
+    pub zh_name: Option<String>,
+}
+
+#[tauri::command]
+fn match_trainers(
+    state: tauri::State<AppState>,
+    games: Vec<TrainerGameQuery>,
+) -> Vec<gm_core::trainers::GameTrainerMatch> {
+    let pairs: Vec<(String, Option<String>)> =
+        games.into_iter().map(|g| (g.title, g.zh_name)).collect();
+    state.trainers.read().unwrap().match_games(&state.trainer_zh, &pairs)
+}
+
+// ======================================================================
+// 修改器下载与安装
+// ======================================================================
+
+/// 修改器安装根目录：设置 trainerPath 优先，默认应用数据目录/Trainers
+fn trainers_root(state: &AppState) -> PathBuf {
+    let root = state
+        .settings
+        .lock()
+        .unwrap()
+        .trainer_path
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| state.app_data_dir.join("Trainers"));
+    let _ = std::fs::create_dir_all(&root);
+    root
+}
+
+/// 7z.exe 位置（随应用资源分发；开发环境回退 src-tauri/resources/bin）
+fn sevenz_path(app: &tauri::AppHandle) -> PathBuf {
+    use tauri::Manager;
+    if let Ok(dir) = app.path().resource_dir() {
+        for candidate in [dir.join("resources/bin/7z.exe"), dir.join("bin/7z.exe")] {
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/bin/7z.exe")
+}
+
+/// 下载进度事件载荷（stage: download / extract / done）
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TrainerProgress {
+    trainer_id: String,
+    stage: String,
+    downloaded: u64,
+    total: u64,
+}
+
+#[tauri::command]
+fn list_installed_trainers(
+    state: tauri::State<AppState>,
+) -> Vec<gm_core::trainers::install::InstalledTrainer> {
+    gm_core::trainers::install::scan_installed(&trainers_root(&state))
+}
+
+/// 下载客户端：站点要求 UA + Referer；代理走环境变量（Clash 场景）
+fn download_client() -> Result<reqwest::blocking::Client, String> {
+    let mut builder = reqwest::blocking::Client::builder()
+        .user_agent(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+        )
+        .connect_timeout(std::time::Duration::from_secs(15));
+    if let Ok(proxy) = std::env::var("HTTPS_PROXY").or_else(|_| std::env::var("https_proxy")) {
+        builder = builder.proxy(reqwest::Proxy::all(&proxy).map_err(|e| format!("代理配置失败: {e}"))?);
+    }
+    builder.build().map_err(|e| e.to_string())
+}
+
+/// 由条目 id + 下载地址组装安装元数据（条目与附件都在目录里，前端只传这两个）
+fn resolve_install_meta(
+    state: &AppState,
+    trainer_id: &str,
+    download_url: &str,
+) -> Result<gm_core::trainers::install::TrainerInstallMeta, String> {
+    let registry = state.trainers.read().unwrap();
+    let Some((_source_id, entry)) = registry.find_entry(trainer_id) else {
+        return Err(format!("目录里找不到修改器：{trainer_id}"));
+    };
+    let Some(dl) = entry.downloads.iter().find(|d| d.url == download_url) else {
+        return Err("目录里找不到该下载地址（请刷新搜索）".to_string());
+    };
+    Ok(gm_core::trainers::install::TrainerInstallMeta {
+        trainer_id: entry.id.clone(),
+        source_id: _source_id.to_string(),
+        game_name: entry.game_name.clone(),
+        zh_name: entry.zh_name.clone(),
+        file: dl.file.clone(),
+        download_url: dl.url.clone(),
+        page_url: entry.page_url.clone(),
+        date_added: dl.date_added.clone(),
+        game_version: dl.game_version.clone(),
+        options_count: dl.options_count,
+        size_bytes: dl.size_bytes,
+    })
+}
+
+/// 阻塞式下载 + 安装（进度事件照发）；调用方负责放在 spawn_blocking 里。
+/// 7z 路径由命令层解析后显式传入（打包环境位于资源目录）。
+fn download_and_install_blocking(
+    app: &tauri::AppHandle,
+    root: &std::path::Path,
+    meta: &gm_core::trainers::install::TrainerInstallMeta,
+    sevenz: &std::path::Path,
+) -> Result<gm_core::trainers::install::InstalledTrainer, String> {
+    use std::io::{Read, Write};
+    use tauri::Emitter;
+
+    let emit = |stage: &str, done: u64, total: u64| {
+        let _ = app.emit(
+            "trainer-download-progress",
+            TrainerProgress {
+                trainer_id: meta.trainer_id.clone(),
+                stage: stage.to_string(),
+                downloaded: done,
+                total,
+            },
+        );
+    };
+
+    // 防重复（同一下载地址只装一次）
+    if gm_core::trainers::install::installed_url_index(root).contains(&meta.download_url) {
+        return Err("该修改器已安装".to_string());
+    }
+
+    // 下载到临时目录（staging，失败整体清理）
+    let tmp_dir = root.join(format!(".download-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&tmp_dir).map_err(|e| format!("创建临时目录失败: {e}"))?;
+    let result = (|| -> Result<gm_core::trainers::install::InstalledTrainer, String> {
+        let client = download_client()?;
+        let mut resp = client
+            .get(&meta.download_url)
+            .header("Referer", &meta.page_url)
+            .send()
+            .map_err(|e| format!("下载请求失败: {e}"))?
+            .error_for_status()
+            .map_err(|e| {
+                format!(
+                    "下载被拒绝（{}）。站点可能开启风控，稍后再试",
+                    e.status().unwrap_or_default()
+                )
+            })?;
+
+        let total = resp.content_length().unwrap_or(0);
+        let tmp_file = tmp_dir.join("package.bin");
+        let mut file =
+            std::fs::File::create(&tmp_file).map_err(|e| format!("创建临时文件失败: {e}"))?;
+        let mut buf = [0u8; 64 * 1024];
+        let mut done = 0u64;
+        let mut last_emit = std::time::Instant::now();
+        loop {
+            let n = resp.read(&mut buf).map_err(|e| format!("下载中断: {e}"))?;
+            if n == 0 {
+                break;
+            }
+            file.write_all(&buf[..n]).map_err(|e| format!("写入失败: {e}"))?;
+            done += n as u64;
+            if last_emit.elapsed() >= std::time::Duration::from_millis(150) {
+                emit("download", done, total);
+                last_emit = std::time::Instant::now();
+            }
+        }
+        file.flush().map_err(|e| e.to_string())?;
+        drop(file);
+        emit("download", done, total);
+
+        // 安装（解压/落位/写 manifest）
+        emit("extract", 0, total);
+        let outcome =
+            gm_core::trainers::install::install_package(&tmp_file, meta, root, sevenz)?;
+        emit("done", done, total);
+
+        Ok(gm_core::trainers::install::InstalledTrainer {
+            manifest: outcome.manifest,
+            folder: outcome.folder.to_string_lossy().to_string(),
+        })
+    })();
+
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+    result
+}
+
+/// 下载并安装一个修改器包（流式下载 + 进度事件 + 魔数嗅探安装）。
+/// 防重复：已安装列表里有同一下载地址直接报错。
+#[tauri::command]
+async fn download_trainer(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    trainer_id: String,
+    download_url: String,
+) -> Result<gm_core::trainers::install::InstalledTrainer, String> {
+    let meta = resolve_install_meta(&state, &trainer_id, &download_url)?;
+    let root = trainers_root(&state);
+    let sevenz = sevenz_path(&app);
+    tauri::async_runtime::spawn_blocking(move || {
+        download_and_install_blocking(&app, &root, &meta, &sevenz)
+    })
+    .await
+    .map_err(|e| format!("下载任务失败: {e}"))?
+}
+
+/// 就地更新：下载安装最新包，成功后删除旧包（旧包删除失败不影响新版可用）。
+#[tauri::command]
+async fn update_trainer(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    trainer_id: String,
+    download_url: String,
+    old_folder: String,
+) -> Result<gm_core::trainers::install::InstalledTrainer, String> {
+    let meta = resolve_install_meta(&state, &trainer_id, &download_url)?;
+    let root = trainers_root(&state);
+    let sevenz = sevenz_path(&app);
+    tauri::async_runtime::spawn_blocking(move || {
+        let installed = download_and_install_blocking(&app, &root, &meta, &sevenz)?;
+        // 新包已就位，旧包尽力清理（失败仅记录，用户可手动删）
+        if let Err(e) =
+            gm_core::trainers::install::delete_installed(&root, std::path::Path::new(&old_folder))
+        {
+            eprintln!("[trainers] 旧包清理失败（不影响使用）: {e}");
+        }
+        Ok(installed)
+    })
+    .await
+    .map_err(|e| format!("更新任务失败: {e}"))?
+}
+
+/// 启动已安装的修改器（ShellExecute，UAC 由 Windows 按 exe 声明处理）
+#[tauri::command]
+fn launch_installed_trainer(folder: String) -> Result<(), String> {
+    gm_core::trainers::install::launch(std::path::Path::new(&folder))
+}
+
+/// 删除已安装的修改器包（引擎侧校验目录必须含有效 manifest 且位于根目录内）
+#[tauri::command]
+fn delete_installed_trainer(
+    state: tauri::State<AppState>,
+    folder: String,
+) -> Result<(), String> {
+    gm_core::trainers::install::delete_installed(&trainers_root(&state), std::path::Path::new(&folder))
+}
+
+/// 更新检查：已安装包 vs 目录最新包（判定键 = 下载地址）
+#[tauri::command]
+fn check_trainer_updates(state: tauri::State<AppState>) -> Vec<gm_core::trainers::TrainerUpdateInfo> {
+    state.trainers.read().unwrap().check_updates(&trainers_root(&state))
+}
+
+// ======================================================================
+// 目录在线更新与 Defender 白名单
+// ======================================================================
+
+/// 修改器目录的在线更新地址（GitHub Release 资产；发布流程见 scripts/trainers/README.md）
+const CATALOG_UPDATE_URL: &str =
+    "https://github.com/LinkJudge/Game-Manage-Center/releases/latest/download/gm-trainers-fling.json";
+
+/// 目录在线更新结果
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CatalogUpdateResult {
+    count: usize,
+    generated_at: Option<String>,
+}
+
+/// 在线更新修改器目录：下载 → 完整校验通过才落盘到应用数据目录 → 整体重载注册表。
+/// 校验失败的下载不会影响当前正在使用的目录。
+#[tauri::command]
+async fn update_trainer_catalog(app: tauri::AppHandle) -> Result<CatalogUpdateResult, String> {
+    use tauri::Manager;
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let client = download_client()?;
+        let json = client
+            .get(CATALOG_UPDATE_URL)
+            .send()
+            .map_err(|e| format!("下载目录失败: {e}"))?
+            .error_for_status()
+            .map_err(|e| {
+                let status = e.status().unwrap_or_default();
+                if status == reqwest::StatusCode::NOT_FOUND {
+                    "发布页上还没有目录资产（gm-trainers-fling.json），需要先按 scripts/trainers/README.md 的流程发布一次".to_string()
+                } else {
+                    format!("目录下载被拒绝（{status}）")
+                }
+            })?
+            .text()
+            .map_err(|e| format!("读取目录数据失败: {e}"))?;
+
+        // 完整校验（能解析出合法的 fling 来源才落盘）
+        let source = gm_core::trainers::fling::FlingSource::from_json(&json)?;
+        use gm_core::trainers::TrainerSource as _;
+        let generated_at = source.generated_at().map(String::from);
+        let count = source.entries().len();
+
+        let dir = state.app_data_dir.join("trainers");
+        std::fs::create_dir_all(&dir).map_err(|e| format!("创建目录失败: {e}"))?;
+        let tmp = dir.join("fling.json.tmp");
+        std::fs::write(&tmp, &json).map_err(|e| format!("写入失败: {e}"))?;
+        std::fs::rename(&tmp, dir.join("fling.json")).map_err(|e| format!("替换失败: {e}"))?;
+
+        // 重载：内置目录在前，应用数据目录在后（后者胜出）
+        let (reg, errs) =
+            gm_core::trainers::TrainerRegistry::load_dirs(&[trainers_dir(&app), dir]);
+        for e in &errs {
+            eprintln!("[trainers] {e}");
+        }
+        *state.trainers.write().unwrap() = reg;
+        Ok(CatalogUpdateResult { count, generated_at })
+    })
+    .await
+    .map_err(|e| format!("目录更新任务失败: {e}"))?
+}
+
+/// 把修改器根目录加入 Windows Defender 排除项（UAC 提权执行 Add-MpPreference）。
+/// 修改器会改游戏内存，常被杀软误删；用户可自行选择是否添加。
+#[tauri::command]
+fn add_defender_exclusion(state: tauri::State<AppState>) -> Result<(), String> {
+    let root = trainers_root(&state);
+    // 内层脚本写临时 ps1（路径含空格也安全），外层 powershell 提权运行它并回传退出码
+    let ps1 = std::env::temp_dir().join(format!("gm-defender-{}.ps1", std::process::id()));
+    std::fs::write(&ps1, format!("Add-MpPreference -ExclusionPath '{}'", root.display()))
+        .map_err(|e| format!("写入临时脚本失败: {e}"))?;
+    let script = format!(
+        "$p = Start-Process powershell -Verb RunAs -Wait -PassThru -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','{}'; exit $p.ExitCode",
+        ps1.display()
+    );
+    let out = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-Command", &script])
+        .output()
+        .map_err(|e| format!("无法运行 PowerShell: {e}"));
+    let _ = std::fs::remove_file(&ps1);
+    let out = out?;
+    if !out.status.success() {
+        let code = out.status.code().unwrap_or(-1);
+        return Err(if code == 1223 {
+            "已取消（未确认 UAC 弹窗）".to_string()
+        } else {
+            format!("未能添加 Defender 排除项（退出码 {code}），可能受安全策略限制")
+        });
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn get_settings(state: tauri::State<AppState>) -> AppSettings {
     state.settings.lock().unwrap().clone()
 }
 
+// 命令层刻意用扁平的 Option 参数做补丁式更新（只改传入项），参数数随设置增长属预期
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 fn save_settings(
     app: tauri::AppHandle,
@@ -112,6 +529,7 @@ fn save_settings(
     compress_backups: Option<bool>,
     auto_backup_enabled: Option<bool>,
     close_to_tray: Option<bool>,
+    trainer_path: Option<String>,
 ) -> Result<AppSettings, String> {
     let was_enabled = state.settings.lock().unwrap().auto_backup_enabled;
     let mut settings = state.settings.lock().unwrap().clone();
@@ -129,6 +547,9 @@ fn save_settings(
     }
     if let Some(tray) = close_to_tray {
         settings.close_to_tray = tray;
+    }
+    if let Some(path) = trainer_path {
+        settings.trainer_path = if path.trim().is_empty() { None } else { Some(path) };
     }
     state.persist(&settings)?;
     // 全局自动备份开关变化 → 立即应用（开启：扫描并挂线程；关闭：全部停止）
@@ -700,9 +1121,39 @@ pub fn run() {
                 .path()
                 .app_data_dir()
                 .map_err(|e| format!("无法定位应用数据目录: {e}"))?;
+
+            // 产品改名一次性迁移：旧标识符数据目录 → 新标识符（设置/自定义游戏/修改器/备份跟随）
+            if let Some(old_dir) = app_data_dir.parent().map(|p| p.join("com.gamemanager.app")) {
+                if old_dir.exists() && !app_data_dir.exists() {
+                    if let Err(e) = std::fs::rename(&old_dir, &app_data_dir) {
+                        // 跨盘等场景退化为复制（保留旧目录兜底）
+                        gm_core::backup::copy_dir_recursive(&old_dir, &app_data_dir)
+                            .map_err(|ce| format!("迁移失败: rename {e}; copy {ce}"))?;
+                    }
+                    eprintln!("[migrate] 数据目录已迁移: {} → {}", old_dir.display(), app_data_dir.display());
+                }
+            }
+
             let settings_path = app_data_dir.join("settings.json");
             let settings = AppSettings::load(&settings_path);
             let db_path = database_path(app.handle()).unwrap_or_else(|_| PathBuf::new());
+
+            // 修改器目录：内置 resources/trainers + 用户更新目录 app_data/trainers
+            // （后者覆盖同来源，缺目录降级为空注册表）
+            let (trainers, trainer_errors) = gm_core::trainers::TrainerRegistry::load_dirs(&[
+                trainers_dir(app.handle()),
+                app_data_dir.join("trainers"),
+            ]);
+            for e in &trainer_errors {
+                eprintln!("[trainers] {e}");
+            }
+            let trainer_zh = gm_core::database::Database::open_readonly(&db_path)
+                .and_then(|db| db.title_zh_pairs())
+                .map(gm_core::trainers::ZhNameIndex::build)
+                .unwrap_or_else(|e| {
+                    eprintln!("[trainers] 中文名索引构建失败: {e}");
+                    gm_core::trainers::ZhNameIndex::empty()
+                });
 
             // 全局自动备份开关：开启时延迟 1.2 秒执行刷新（等窗口就绪，避免阻塞启动）
             if settings.auto_backup_enabled && db_path.exists() {
@@ -721,6 +1172,8 @@ pub fn run() {
                 settings_path,
                 custom_games_path: app_data_dir.join("custom_games.json"),
                 app_data_dir: app_data_dir.clone(),
+                trainers: std::sync::RwLock::new(trainers),
+                trainer_zh,
             });
 
             // 系统托盘：显示主窗口 / 打开备份文件夹 / 退出
@@ -735,7 +1188,7 @@ pub fn run() {
             let menu = Menu::with_items(app, &[&show, &open_backups, &quit])?;
             TrayIconBuilder::with_id("main-tray")
                 .icon(app.default_window_icon().expect("missing app icon").clone())
-                .tooltip("Game Manager")
+                .tooltip("Game Manage Center")
                 .menu(&menu)
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "show" => {
@@ -792,6 +1245,17 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app_info,
             list_modules,
+            list_trainer_sources,
+            search_trainers,
+            match_trainers,
+            list_installed_trainers,
+            download_trainer,
+            update_trainer,
+            launch_installed_trainer,
+            delete_installed_trainer,
+            check_trainer_updates,
+            update_trainer_catalog,
+            add_defender_exclusion,
             list_games,
             detect_environment,
             scan_installed_games,

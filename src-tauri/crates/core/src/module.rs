@@ -1,8 +1,9 @@
-//! 多模块管理抽象 —— Game Manager 的愿景：不只管理存档，还将管理修改器与 MOD。
+//! 多模块管理抽象 —— Game Manage Center 的愿景：不只管理存档，还将管理修改器与 MOD。
 //!
 //! 预留方式：所有功能模块实现 [`GameModule`] 接口并向 [`modules`] 注册表登记。
-//! 当前只有 saves（存档）模块真正实现；trainers / mods 为占位登记，
-//! 后续实现时在此接入，UI 导航与命令层按 ModuleInfo 驱动，无需大改。
+//! 当前 saves（存档）模块完整实现；trainers（修改器）目录检索已就位（下载/安装
+//! 尚未接入，implemented 仍为 false，UI 以 capabilities 探测可用能力）；
+//! mods 为占位登记。后续能力就绪即在对应模块上追加 capability 标签。
 
 use serde::Serialize;
 
@@ -14,7 +15,7 @@ pub struct ModuleInfo {
     pub id: &'static str,
     pub display_name: &'static str,
     pub description: &'static str,
-    /// false = 占位（规划中，UI 显示为禁用）
+    /// false = 用户功能未完整（UI 显示为禁用）
     pub implemented: bool,
     /// 能力标签，供 UI 与命令层探测
     pub capabilities: &'static [&'static str],
@@ -24,7 +25,7 @@ pub trait GameModule {
     fn info(&self) -> ModuleInfo;
 }
 
-/// 存档模块（当前唯一实现；能力由 scanner/backup/restore 引擎承载）
+/// 存档模块（完整实现；能力由 scanner/backup/restore 引擎承载）
 pub struct SaveModule;
 
 impl GameModule for SaveModule {
@@ -35,6 +36,21 @@ impl GameModule for SaveModule {
             description: "自动扫描、备份与恢复游戏存档，支持多账号与多平台",
             implemented: true,
             capabilities: &["scan", "backup", "restore", "auto-backup"],
+        }
+    }
+}
+
+/// 修改器模块：搜索、下载安装、启动与更新已完整接入
+pub struct TrainerModule;
+
+impl GameModule for TrainerModule {
+    fn info(&self) -> ModuleInfo {
+        ModuleInfo {
+            id: "trainers",
+            display_name: "修改器",
+            description: "修改器的搜索、下载安装、启动与更新（风灵月影，多来源预留）",
+            implemented: true,
+            capabilities: &["search", "match-games", "download", "launch", "update"],
         }
     }
 }
@@ -62,12 +78,7 @@ impl GameModule for ReservedModule {
 pub fn modules() -> Vec<ModuleInfo> {
     vec![
         SaveModule.info(),
-        ReservedModule {
-            id: "trainers",
-            display_name: "修改器",
-            description: "游戏修改器的管理、更新与一站式启动（规划中）",
-        }
-        .info(),
+        TrainerModule.info(),
         ReservedModule {
             id: "mods",
             display_name: "MOD",
@@ -88,11 +99,18 @@ mod tests {
         assert_eq!(mods[0].id, "saves");
         assert!(mods[0].implemented);
         assert!(mods[0].capabilities.contains(&"backup"));
-        // 预留模块未实现、id 唯一
+        // 修改器模块已完整实现：检索/下载/启动/更新
+        let trainers = mods.iter().find(|m| m.id == "trainers").expect("trainers 注册");
+        assert!(trainers.implemented);
+        assert!(trainers.capabilities.contains(&"search"));
+        assert!(trainers.capabilities.contains(&"download"));
+        assert!(trainers.capabilities.contains(&"launch"));
+        // MOD 仍为占位
+        let mods_mod = mods.iter().find(|m| m.id == "mods").expect("mods 注册");
+        assert!(!mods_mod.implemented);
+        assert!(mods_mod.capabilities.is_empty());
+        // id 唯一
         let ids: Vec<_> = mods.iter().map(|m| m.id).collect();
         assert_eq!(ids.len(), std::collections::HashSet::<_>::from_iter(ids.iter().copied()).len());
-        assert!(mods.iter().all(|m| m.implemented || m.capabilities.is_empty()));
-        assert!(mods.iter().any(|m| m.id == "trainers"));
-        assert!(mods.iter().any(|m| m.id == "mods"));
     }
 }

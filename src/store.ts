@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
-import type { ScanOutput } from "@/types";
+import type { GameTrainerMatch, ScanOutput } from "@/types";
 
 interface ScanStore {
   /** 常规扫描结果（仅已安装游戏；localStorage 持久化，重启仍在） */
@@ -64,6 +64,30 @@ export const useScanStore = create<ScanStore>()(
         autoScanOnStartup: s.autoScanOnStartup,
         autoScanIntervalMin: s.autoScanIntervalMin,
       }),
+    },
+  ),
+);
+
+interface TrainerStore {
+  /** 修改器搜索词（持久化：切回标签页时自动重新搜索） */
+  trainerQuery: string;
+  /** 「匹配已安装游戏」的结果快照（持久化：切页不丢，手动清除或重新匹配才更新） */
+  trainerMatches: GameTrainerMatch[] | null;
+  setTrainerQuery: (q: string) => void;
+  setTrainerMatches: (m: GameTrainerMatch[] | null) => void;
+}
+
+export const useTrainerStore = create<TrainerStore>()(
+  persist(
+    (set) => ({
+      trainerQuery: "",
+      trainerMatches: null,
+      setTrainerQuery: (q) => set({ trainerQuery: q }),
+      setTrainerMatches: (m) => set({ trainerMatches: m }),
+    }),
+    {
+      name: "gm-trainer-store",
+      storage: createJSONStorage(() => localStorage),
     },
   ),
 );

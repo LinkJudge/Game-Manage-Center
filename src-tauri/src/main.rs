@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    game_manager_app_lib::run()
+    game_manage_center_lib::run()
 }

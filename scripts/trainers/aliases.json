@@ -1,0 +1,4 @@
+{
+  "_comment": "版本变体别名表：slug → 该条目应额外响应的游戏名（英文）。用于来源站点把基础版合并进版本页的场景（如风灵月影把 Monster Hunter: World 并入 Iceborne 页）。检索与游戏匹配时别名与 gameName 同权。新增一行后重跑 fling-catalog.cjs --build-only 即可。",
+  "monster-hunter-world-iceborne-trainer-1709484154": ["Monster Hunter: World"]
+}
