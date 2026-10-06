@@ -1278,7 +1278,7 @@ dependencies = [
 
 [[package]]
 name = "game-manage-center"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "gm-core",
  "notify",
@@ -1526,7 +1526,7 @@ checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 
 [[package]]
 name = "gm-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "glob",

@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "game-manage-center"
-version = "0.2.0"
+version = "0.3.0"
 description = "Game Manage Center - centralize, back up and restore your game saves"
 authors = ["you"]
 license = "GPL-3.0-only"
