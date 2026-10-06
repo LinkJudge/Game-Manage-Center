@@ -33,3 +33,7 @@ src-tauri/logs
 
 # 数据管道抓取缓存（不入库）
 scripts/trainers/.cache/
+
+# 本地版本留档
+/v0.1.0/
+/v0.2.0/
