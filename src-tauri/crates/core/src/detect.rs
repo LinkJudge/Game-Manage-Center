@@ -177,29 +177,34 @@ pub fn detect_windows() -> DetectedEnvironment {
         let vdf_path = std::path::Path::new(steam).join("config").join("libraryfolders.vdf");
         if let Ok(text) = std::fs::read_to_string(&vdf_path) {
             if let Ok(vdf) = crate::vdf::parse_vdf(&text) {
-                // appid → 安装目录：读各库的 appmanifest_*.acf（installdir 字段）
-                for (root, appids) in crate::vdf::steam_library_apps(&vdf) {
-                    for appid in appids {
-                        let manifest = std::path::Path::new(&root)
-                            .join("steamapps")
-                            .join(format!("appmanifest_{appid}.acf"));
-                        if let Ok(acf_text) = std::fs::read_to_string(&manifest) {
-                            if let Ok(acf) = crate::vdf::parse_vdf(&acf_text) {
-                                if let Some(installdir) =
-                                    acf.get("installdir").and_then(crate::vdf::Vdf::as_str)
-                                {
-                                    let install_path = std::path::Path::new(&root)
-                                        .join("steamapps")
-                                        .join("common")
-                                        .join(installdir);
-                                    env.steam_apps
-                                        .insert(appid, install_path.to_string_lossy().to_string());
+                for root in crate::vdf::steam_library_roots(&vdf) {
+                    // appid → 安装目录：直接枚举 steamapps 下的 appmanifest_*.acf——
+                    // 磁盘上的 acf 是"已安装"的权威事实；vdf 的 apps 列表由 Steam
+                    // 定期回写，可能滞后/遗漏（实测：Steep 已装但不在 apps 里）
+                    let steamapps = std::path::Path::new(&root).join("steamapps");
+                    if let Ok(entries) = std::fs::read_dir(&steamapps) {
+                        for entry in entries.flatten() {
+                            let name = entry.file_name().to_string_lossy().to_string();
+                            let Some(appid) = name
+                                .strip_prefix("appmanifest_")
+                                .and_then(|s| s.strip_suffix(".acf"))
+                            else {
+                                continue;
+                            };
+                            if let Ok(acf_text) = std::fs::read_to_string(entry.path()) {
+                                if let Ok(acf) = crate::vdf::parse_vdf(&acf_text) {
+                                    if let Some(installdir) = crate::vdf::acf_installdir(&acf) {
+                                        let install_path =
+                                            steamapps.join("common").join(installdir);
+                                        env.steam_apps.insert(
+                                            appid.to_string(),
+                                            install_path.to_string_lossy().to_string(),
+                                        );
+                                    }
                                 }
                             }
                         }
                     }
-                }
-                for root in crate::vdf::steam_library_roots(&vdf) {
                     let common = format!("{root}\\steamapps\\common");
                     if existing(&common).is_some()
                         && !install_paths.iter().any(|r| r.path == common)
@@ -298,10 +303,14 @@ pub fn detect_windows() -> DetectedEnvironment {
                         candidates.push((name, mtime));
                     }
                 }
-                if let Some(account) = latest_account_from_entries(&candidates) {
-                    if account.chars().all(|c| c.is_ascii_digit()) {
-                        env.accounts.ubisoft = Some(account);
-                    }
+                // 先过滤出纯数字目录再取最新：savegames 下混入非数字目录（如 .backup）
+                // 时不能让它们抢掉真实账号
+                let numeric: Vec<(String, u64)> = candidates
+                    .into_iter()
+                    .filter(|(name, _)| !name.is_empty() && name.chars().all(|c| c.is_ascii_digit()))
+                    .collect();
+                if let Some(account) = latest_account_from_entries(&numeric) {
+                    env.accounts.ubisoft = Some(account);
                 }
             }
         }

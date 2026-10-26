@@ -146,6 +146,13 @@ export function RestoreTab() {
       .catch((e) => toast.error("检查冲突失败", { description: String(e) }));
   };
 
+  // 恢复最新备份：列表可能为空（备份目录被外部清理），取不到就静默返回
+  const startRestoreLatest = (game: GameBackups) => {
+    const latest = game.backups[0];
+    if (!latest) return;
+    startRestore(game, latest.date);
+  };
+
   const doDelete = useMutation({
     mutationFn: (args: { id: number; date: string }) =>
       invoke<void>("delete_backup", { wikiPageId: args.id, date: args.date }),
@@ -196,7 +203,7 @@ export function RestoreTab() {
       {
         label: "恢复最新备份",
         icon: RotateCcw,
-        onSelect: () => startRestore(game, game.backups[0].date),
+        onSelect: () => startRestoreLatest(game),
       },
       { label: "管理备份记录", icon: Settings2, onSelect: () => setManageGameId(game.wikiPageId) },
     ];
@@ -290,8 +297,8 @@ export function RestoreTab() {
                 <TableCell className="space-x-1 text-right">
                   <Button
                     size="sm"
-                    onClick={() => startRestore(game, game.backups[0].date)}
-                    disabled={restore.isPending}
+                    onClick={() => startRestoreLatest(game)}
+                    disabled={restore.isPending || game.backups.length === 0}
                   >
                     {restore.isPending && restore.variables?.id === game.wikiPageId ? (
                       <Loader2 className="mr-1 size-3.5 animate-spin" />

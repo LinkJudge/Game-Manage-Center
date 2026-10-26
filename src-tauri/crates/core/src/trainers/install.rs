@@ -425,7 +425,17 @@ pub fn delete_installed(root: &Path, folder: &Path) -> Result<(), String> {
     read_manifest(&folder_canon)?;
     std::fs::remove_dir_all(&folder_canon).map_err(|e| {
         format!("删除失败：{e}（修改器可能正在运行，请先退出）")
-    })
+    })?;
+    // 最后一个包删除后清理空的游戏目录（与备份侧 remove_game_dir_if_empty 同款策略）
+    if let Some(parent) = folder_canon.parent() {
+        if parent != root_canon
+            && parent.starts_with(&root_canon)
+            && std::fs::read_dir(parent).map(|mut d| d.next().is_none()).unwrap_or(false)
+        {
+            let _ = std::fs::remove_dir(parent);
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -3,19 +3,21 @@
 use gm_core::settings::AppSettings;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::atomic::Ordering;
 use std::sync::Mutex;
 
 /// 应用全局状态：设置 + 数据库位置（tauri State 管理）
 pub struct AppState {
     pub settings: Mutex<AppSettings>,
-    pub db_path: PathBuf,
+    /// 当前生效的存档数据库路径：内置资源，或用户更新版（app_data/database.db）
+    pub db_path: Mutex<PathBuf>,
     pub settings_path: PathBuf,
     pub app_data_dir: PathBuf,
     pub custom_games_path: PathBuf,
     /// 修改器目录注册表（启动装载；目录在线更新后整体替换）
     pub trainers: std::sync::RwLock<gm_core::trainers::TrainerRegistry>,
-    /// 修改器中文名索引（来自游戏库 title→zh_CN，启动时构建，只读）
-    pub trainer_zh: gm_core::trainers::ZhNameIndex,
+    /// 修改器中文名索引（来自游戏库 title→zh_CN，启动构建；数据库更新后重建）
+    pub trainer_zh: std::sync::RwLock<gm_core::trainers::ZhNameIndex>,
 }
 
 impl AppState {
@@ -63,6 +65,69 @@ fn app_info() -> AppInfo {
         version: env!("CARGO_PKG_VERSION").to_string(),
         core_version: gm_core::version().to_string(),
     }
+}
+
+/// 应用更新检查结果（匿名查 GitHub Release，无需令牌）
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppUpdateInfo {
+    pub current_version: String,
+    pub latest_version: Option<String>,
+    pub has_update: bool,
+    pub release_url: String,
+}
+
+/// major.minor.patch 数值比较（tag 形如 v0.3.0）
+fn version_newer(tag: &str, current: &str) -> bool {
+    let parse = |s: &str| -> Vec<u64> {
+        s.trim_start_matches('v')
+            .split('.')
+            .map(|p| p.trim().parse::<u64>().unwrap_or(0))
+            .collect()
+    };
+    let (a, b) = (parse(tag), parse(current));
+    for i in 0..3 {
+        let (x, y) = (a.get(i).copied().unwrap_or(0), b.get(i).copied().unwrap_or(0));
+        if x != y {
+            return x > y;
+        }
+    }
+    false
+}
+
+#[tauri::command]
+async fn check_app_update() -> Result<AppUpdateInfo, String> {
+    const RELEASES_API: &str =
+        "https://api.github.com/repos/LinkJudge/Game-Manage-Center/releases/latest";
+    const RELEASE_PAGE: &str =
+        "https://github.com/LinkJudge/Game-Manage-Center/releases/latest";
+    let current = env!("CARGO_PKG_VERSION").to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        let client = download_client()?;
+        let json: serde_json::Value = client
+            .get(RELEASES_API)
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .map_err(|e| format!("无法连接 GitHub: {e}"))?
+            .error_for_status()
+            .map_err(|e| format!("查询发布信息被拒绝（{}）", e.status().unwrap_or_default()))?
+            .text()
+            .map_err(|e| format!("读取发布信息失败: {e}"))
+            .and_then(|text| serde_json::from_str(&text).map_err(|e| format!("解析发布信息失败: {e}")))?;
+        let tag = json
+            .get("tag_name")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim_start_matches('v').to_string());
+        let has_update = tag.as_deref().map(|t| version_newer(t, &current)).unwrap_or(false);
+        Ok(AppUpdateInfo {
+            current_version: current,
+            latest_version: tag,
+            has_update,
+            release_url: RELEASE_PAGE.to_string(),
+        })
+    })
+    .await
+    .map_err(|e| format!("更新检查任务失败: {e}"))?
 }
 
 // ======================================================================
@@ -156,7 +221,11 @@ fn search_trainers(
         .trainers
         .read()
         .unwrap()
-        .search(&query, &state.trainer_zh, limit.unwrap_or(50).clamp(1, 200) as usize)
+        .search(
+            &query,
+            &state.trainer_zh.read().unwrap(),
+            limit.unwrap_or(50).clamp(1, 200) as usize,
+        )
 }
 
 /// 游戏匹配查询输入：前端把扫描到的游戏（标题 + 可选中文名）传回来
@@ -175,7 +244,11 @@ fn match_trainers(
 ) -> Vec<gm_core::trainers::GameTrainerMatch> {
     let pairs: Vec<(String, Option<String>)> =
         games.into_iter().map(|g| (g.title, g.zh_name)).collect();
-    state.trainers.read().unwrap().match_games(&state.trainer_zh, &pairs)
+    state
+        .trainers
+        .read()
+        .unwrap()
+        .match_games(&state.trainer_zh.read().unwrap(), &pairs)
 }
 
 // ======================================================================
@@ -267,6 +340,137 @@ fn resolve_install_meta(
     })
 }
 
+/// 单流下载（Range 不可用或文件较小时的回退路径）。返回记录用的大小
+fn download_single_stream(
+    client: &reqwest::blocking::Client,
+    url: &reqwest::Url,
+    referer: &str,
+    tmp_file: &std::path::Path,
+    emit: &dyn Fn(&str, u64, u64),
+) -> Result<u64, String> {
+    use std::io::{Read, Write};
+    let mut resp = client
+        .get(url.clone())
+        .header("Referer", referer)
+        .send()
+        .map_err(|e| format!("下载请求失败: {e}"))?
+        .error_for_status()
+        .map_err(|e| {
+            format!(
+                "下载被拒绝（{}）。站点可能开启风控，稍后再试",
+                e.status().unwrap_or_default()
+            )
+        })?;
+    let total = resp.content_length().unwrap_or(0);
+    let mut file =
+        std::fs::File::create(tmp_file).map_err(|e| format!("创建临时文件失败: {e}"))?;
+    let mut buf = [0u8; 64 * 1024];
+    let mut done = 0u64;
+    let mut last_emit = std::time::Instant::now();
+    loop {
+        let n = resp.read(&mut buf).map_err(|e| format!("下载中断: {e}"))?;
+        if n == 0 {
+            break;
+        }
+        file.write_all(&buf[..n]).map_err(|e| format!("写入失败: {e}"))?;
+        done += n as u64;
+        if last_emit.elapsed() >= std::time::Duration::from_millis(150) {
+            emit("download", done, total);
+            last_emit = std::time::Instant::now();
+        }
+    }
+    file.flush().map_err(|e| e.to_string())?;
+    emit("download", done, total);
+    Ok(total.max(done))
+}
+
+/// 多连接分段并行下载：每段独立连接（各付一次连接/重定向开销），单连接被
+/// CDN 限速时总速度接近分段数倍数。任一分段失败即整体失败（staging 由外层清理）
+fn download_ranged_parallel(
+    final_url: &reqwest::Url,
+    referer: &str,
+    tmp_file: &std::path::Path,
+    total: u64,
+    segments: u64,
+    emit: &dyn Fn(&str, u64, u64),
+) -> Result<(), String> {
+    use std::io::{Read, Seek, SeekFrom, Write};
+    use std::sync::atomic::AtomicU64;
+    use std::sync::{Arc, Mutex};
+
+    // 预分配目标文件，各分段按偏移写入
+    {
+        let f = std::fs::File::create(tmp_file).map_err(|e| format!("创建临时文件失败: {e}"))?;
+        f.set_len(total).map_err(|e| format!("预分配失败: {e}"))?;
+    }
+    let progress = Arc::new(AtomicU64::new(0));
+    let first_err: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+
+    let seg_size = total.div_ceil(segments);
+    std::thread::scope(|s| {
+        for i in 0..segments {
+            let start = i * seg_size;
+            if start >= total {
+                break;
+            }
+            let end = (start + seg_size - 1).min(total - 1);
+            let progress = Arc::clone(&progress);
+            let first_err = Arc::clone(&first_err);
+            s.spawn(move || {
+                let run = || -> Result<(), String> {
+                    let client = download_client()?;
+                    let mut resp = client
+                        .get(final_url.clone())
+                        .header("Referer", referer)
+                        .header("Range", format!("bytes={start}-{end}"))
+                        .send()
+                        .map_err(|e| format!("分段 {i} 请求失败: {e}"))?;
+                    if resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
+                        return Err(format!("分段 {i} 被拒绝（{}）", resp.status()));
+                    }
+                    let mut file = std::fs::OpenOptions::new()
+                        .write(true)
+                        .open(tmp_file)
+                        .map_err(|e| format!("分段 {i} 打开临时文件失败: {e}"))?;
+                    file.seek(SeekFrom::Start(start)).map_err(|e| e.to_string())?;
+                    let mut buf = [0u8; 64 * 1024];
+                    loop {
+                        let n =
+                            resp.read(&mut buf).map_err(|e| format!("分段 {i} 下载中断: {e}"))?;
+                        if n == 0 {
+                            break;
+                        }
+                        file.write_all(&buf[..n])
+                            .map_err(|e| format!("分段 {i} 写入失败: {e}"))?;
+                        progress.fetch_add(n as u64, Ordering::Relaxed);
+                    }
+                    Ok(())
+                };
+                if let Err(e) = run() {
+                    let mut slot = first_err.lock().unwrap();
+                    if slot.is_none() {
+                        *slot = Some(e);
+                    }
+                }
+            });
+        }
+        // 进度泵：分段线程各自跑，这里按 150ms 节拍发聚合进度
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            let done = progress.load(Ordering::Relaxed);
+            emit("download", done.min(total), total);
+            if done >= total || first_err.lock().unwrap().is_some() {
+                break;
+            }
+        }
+    });
+    if let Some(e) = first_err.lock().unwrap().take() {
+        return Err(e);
+    }
+    emit("download", total, total);
+    Ok(())
+}
+
 /// 阻塞式下载 + 安装（进度事件照发）；调用方负责放在 spawn_blocking 里。
 /// 7z 路径由命令层解析后显式传入（打包环境位于资源目录）。
 fn download_and_install_blocking(
@@ -275,7 +479,6 @@ fn download_and_install_blocking(
     meta: &gm_core::trainers::install::TrainerInstallMeta,
     sevenz: &std::path::Path,
 ) -> Result<gm_core::trainers::install::InstalledTrainer, String> {
-    use std::io::{Read, Write};
     use tauri::Emitter;
 
     let emit = |stage: &str, done: u64, total: u64| {
@@ -295,52 +498,60 @@ fn download_and_install_blocking(
         return Err("该修改器已安装".to_string());
     }
 
+    // 立即发一帧"连接中"进度：前端收到事件就把按钮换成进度条，
+    // 否则要等重定向链走完（站点慢时数秒）界面才有反应
+    emit("download", 0, 0);
+
     // 下载到临时目录（staging，失败整体清理）
     let tmp_dir = root.join(format!(".download-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&tmp_dir).map_err(|e| format!("创建临时目录失败: {e}"))?;
     let result = (|| -> Result<gm_core::trainers::install::InstalledTrainer, String> {
         let client = download_client()?;
-        let mut resp = client
+        let tmp_file = tmp_dir.join("package.bin");
+
+        // 探测：Range 请求随重定向拿到最终地址与总大小（CDN 支持 206 分段）
+        let probe = client
             .get(&meta.download_url)
             .header("Referer", &meta.page_url)
+            .header("Range", "bytes=0-0")
             .send()
-            .map_err(|e| format!("下载请求失败: {e}"))?
-            .error_for_status()
-            .map_err(|e| {
-                format!(
-                    "下载被拒绝（{}）。站点可能开启风控，稍后再试",
-                    e.status().unwrap_or_default()
-                )
-            })?;
+            .map_err(|e| format!("下载请求失败: {e}"))?;
+        let ranged_total: Option<u64> = if probe.status() == reqwest::StatusCode::PARTIAL_CONTENT {
+            probe
+                .headers()
+                .get(reqwest::header::CONTENT_RANGE)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.rsplit('/').next())
+                .and_then(|s| s.trim().parse::<u64>().ok())
+        } else {
+            None
+        };
+        let final_url = probe.url().clone();
+        drop(probe);
 
-        let total = resp.content_length().unwrap_or(0);
-        let tmp_file = tmp_dir.join("package.bin");
-        let mut file =
-            std::fs::File::create(&tmp_file).map_err(|e| format!("创建临时文件失败: {e}"))?;
-        let mut buf = [0u8; 64 * 1024];
-        let mut done = 0u64;
-        let mut last_emit = std::time::Instant::now();
-        loop {
-            let n = resp.read(&mut buf).map_err(|e| format!("下载中断: {e}"))?;
-            if n == 0 {
-                break;
+        let total = match ranged_total {
+            // 支持分段且足够大：多连接并行拉取（单连接被限速时显著提速）
+            Some(t) if t >= 256 * 1024 => {
+                let segments = if t >= 512 * 1024 { 4u64 } else { 2u64 };
+                download_ranged_parallel(
+                    &final_url,
+                    &meta.page_url,
+                    &tmp_file,
+                    t,
+                    segments,
+                    &emit,
+                )?;
+                t
             }
-            file.write_all(&buf[..n]).map_err(|e| format!("写入失败: {e}"))?;
-            done += n as u64;
-            if last_emit.elapsed() >= std::time::Duration::from_millis(150) {
-                emit("download", done, total);
-                last_emit = std::time::Instant::now();
-            }
-        }
-        file.flush().map_err(|e| e.to_string())?;
-        drop(file);
-        emit("download", done, total);
+            // 其余回退单流下载
+            _ => download_single_stream(&client, &final_url, &meta.page_url, &tmp_file, &emit)?,
+        };
 
         // 安装（解压/落位/写 manifest）
         emit("extract", 0, total);
         let outcome =
             gm_core::trainers::install::install_package(&tmp_file, meta, root, sevenz)?;
-        emit("done", done, total);
+        emit("done", total, total);
 
         Ok(gm_core::trainers::install::InstalledTrainer {
             manifest: outcome.manifest,
@@ -364,11 +575,11 @@ async fn download_trainer(
     let meta = resolve_install_meta(&state, &trainer_id, &download_url)?;
     let root = trainers_root(&state);
     let sevenz = sevenz_path(&app);
-    tauri::async_runtime::spawn_blocking(move || {
+    let join = tauri::async_runtime::spawn_blocking(move || {
         download_and_install_blocking(&app, &root, &meta, &sevenz)
     })
-    .await
-    .map_err(|e| format!("下载任务失败: {e}"))?
+    .await;
+    join.map_err(|e| format!("下载任务失败: {e}"))?
 }
 
 /// 就地更新：下载安装最新包，成功后删除旧包（旧包删除失败不影响新版可用）。
@@ -383,7 +594,7 @@ async fn update_trainer(
     let meta = resolve_install_meta(&state, &trainer_id, &download_url)?;
     let root = trainers_root(&state);
     let sevenz = sevenz_path(&app);
-    tauri::async_runtime::spawn_blocking(move || {
+    let join = tauri::async_runtime::spawn_blocking(move || {
         let installed = download_and_install_blocking(&app, &root, &meta, &sevenz)?;
         // 新包已就位，旧包尽力清理（失败仅记录，用户可手动删）
         if let Err(e) =
@@ -393,8 +604,8 @@ async fn update_trainer(
         }
         Ok(installed)
     })
-    .await
-    .map_err(|e| format!("更新任务失败: {e}"))?
+    .await;
+    join.map_err(|e| format!("更新任务失败: {e}"))?
 }
 
 /// 启动已安装的修改器（ShellExecute，UAC 由 Windows 按 exe 声明处理）
@@ -592,43 +803,103 @@ fn set_autostart(app: tauri::AppHandle, enabled: bool) -> Result<bool, String> {
 }
 
 // ======================================================================
-// 游戏数据库命令
-// ======================================================================
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GamesPage {
-    pub items: Vec<gm_core::database::GameEntry>,
-    pub total: i64,
-}
-
-#[tauri::command]
-async fn list_games(
-    state: tauri::State<'_, AppState>,
-    search: Option<String>,
-    limit: Option<u32>,
-    offset: Option<u32>,
-) -> Result<GamesPage, String> {
-    let db_path = state.db_path.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let db = gm_core::database::Database::open_readonly(&db_path)?;
-        let limit = limit.unwrap_or(200).min(1000);
-        let offset = offset.unwrap_or(0);
-        let items = db.list_games(search.as_deref(), limit, offset)?;
-        let total = db.total_games()?;
-        Ok(GamesPage { items, total })
-    })
-    .await
-    .map_err(|e| format!("任务失败: {e}"))?
-}
-
-// ======================================================================
 // 环境探测与扫描命令
 // ======================================================================
 
+/// 校验一个 SQLite 文件确为有效的存档数据库（返回游戏条数）
+fn validate_database(path: &std::path::Path) -> Result<i64, String> {
+    let db = gm_core::database::Database::open_readonly(path)?;
+    let count = db.total_games()?;
+    if count <= 0 {
+        return Err("数据库为空".to_string());
+    }
+    Ok(count)
+}
+
+/// 当前存档数据库信息（条数 / 来源 / 更新时间）
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveDatabaseInfo {
+    pub count: i64,
+    /// "user" = 应用内更新过；"bundled" = 随应用分发
+    pub source: String,
+    /// 文件最后修改时间（RFC3339；内置资源为构建时间）
+    #[serde(rename = "updatedAt")]
+    pub updated_at: Option<String>,
+}
+
 #[tauri::command]
-fn detect_environment() -> gm_core::detect::DetectedEnvironment {
-    gm_core::detect::detect()
+fn save_database_info(state: tauri::State<AppState>) -> Result<SaveDatabaseInfo, String> {
+    let path = state.db_path.lock().unwrap().clone();
+    let count = validate_database(&path)?;
+    let user_db = state.app_data_dir.join("database.db");
+    let source = if path == user_db { "user" } else { "bundled" }.to_string();
+    let updated_at = std::fs::metadata(&path)
+        .ok().and_then(|m| m.modified().ok())
+        .map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+        ;
+    Ok(SaveDatabaseInfo { count, source, updated_at })
+}
+
+/// 应用内更新存档数据库：从发布页下载 → 校验 → 原子落盘到应用数据目录
+/// → 热切换当前数据库并重建中文名索引。校验失败不影响正在使用的数据库。
+#[tauri::command]
+async fn update_save_database(app: tauri::AppHandle) -> Result<SaveDatabaseInfo, String> {
+    use tauri::Manager;
+    const DATABASE_URL: &str =
+        "https://github.com/LinkJudge/Game-Manage-Center/releases/latest/download/gm-database.db";
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let client = download_client()?;
+        let bytes = client
+            .get(DATABASE_URL)
+            .send()
+            .map_err(|e| format!("下载数据库失败: {e}"))?
+            .error_for_status()
+            .map_err(|e| {
+                let status = e.status().unwrap_or_default();
+                if status == reqwest::StatusCode::NOT_FOUND {
+                    "发布页上还没有数据库资产（gm-database.db），需要先发布一次".to_string()
+                } else {
+                    format!("数据库下载被拒绝（{status}）")
+                }
+            })?
+            .bytes()
+            .map_err(|e| format!("读取数据库失败: {e}"))?;
+
+        // 校验：先落临时文件再整体验证，失败的下载不碰现有数据库
+        let target = state.app_data_dir.join("database.db");
+        let tmp = state.app_data_dir.join("database.db.tmp");
+        std::fs::write(&tmp, &bytes).map_err(|e| format!("写入临时文件失败: {e}"))?;
+        let count = validate_database(&tmp).map_err(|e| {
+            let _ = std::fs::remove_file(&tmp);
+            format!("下载数据库校验失败: {e}")
+        })?;
+        std::fs::rename(&tmp, &target).map_err(|e| format!("替换数据库失败: {e}"))?;
+
+        // 热切换当前数据库 + 重建修改器中文名索引
+        *state.db_path.lock().unwrap() = target.clone();
+        let zh = gm_core::database::Database::open_readonly(&target)
+            .and_then(|db| db.title_zh_pairs())
+            .map(gm_core::trainers::ZhNameIndex::build)
+            .unwrap_or_else(|e| {
+                eprintln!("[database] 中文名索引重建失败: {e}");
+                gm_core::trainers::ZhNameIndex::empty()
+            });
+        *state.trainer_zh.write().unwrap() = zh;
+
+        let updated_at = std::fs::metadata(&target)
+            .ok().and_then(|m| m.modified().ok())
+            .map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+            ;
+        Ok(SaveDatabaseInfo {
+            count,
+            source: "user".to_string(),
+            updated_at,
+        })
+    })
+    .await
+    .map_err(|e| format!("数据库更新任务失败: {e}"))?
 }
 
 #[tauri::command]
@@ -636,7 +907,7 @@ async fn scan_installed_games(
     state: tauri::State<'_, AppState>,
     all_accounts: Option<bool>,
 ) -> Result<gm_core::scanner::ScanOutput, String> {
-    let db_path = state.db_path.clone();
+    let db_path = state.db_path.lock().unwrap().clone();
     let customs_path = state.custom_games_path.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let db = gm_core::database::Database::open_readonly(&db_path)?;
@@ -654,7 +925,7 @@ async fn scan_deep_games(
     state: tauri::State<'_, AppState>,
     all_accounts: Option<bool>,
 ) -> Result<gm_core::scanner::ScanOutput, String> {
-    let db_path = state.db_path.clone();
+    let db_path = state.db_path.lock().unwrap().clone();
     let customs_path = state.custom_games_path.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let db = gm_core::database::Database::open_readonly(&db_path)?;
@@ -698,31 +969,6 @@ fn pick_file(app: tauri::AppHandle) -> Option<String> {
         .map(|p| p.to_string())
 }
 
-#[tauri::command]
-async fn game_detail(
-    state: tauri::State<'_, AppState>,
-    wiki_page_id: i64,
-    all_accounts: Option<bool>,
-) -> Result<Option<gm_core::scanner::ScannedGame>, String> {
-    let db_path = state.db_path.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let db = gm_core::database::Database::open_readonly(&db_path)?;
-        let Some(entry) = db.get_game(wiki_page_id)? else {
-            return Ok(None);
-        };
-        let env = gm_core::detect::detect();
-        let home = home_dir();
-        Ok(Some(gm_core::scanner::scan_game(
-            &entry,
-            &env,
-            &home,
-            all_accounts.unwrap_or(false),
-        )))
-    })
-    .await
-    .map_err(|e| format!("解析任务失败: {e}"))?
-}
-
 // ======================================================================
 // 备份与恢复命令
 // ======================================================================
@@ -733,7 +979,7 @@ async fn backup_game(
     wiki_page_id: i64,
     all_accounts: Option<bool>,
 ) -> Result<String, String> {
-    let db_path = state.db_path.clone();
+    let db_path = state.db_path.lock().unwrap().clone();
     let root = state.backups_root();
     let max = state.max_backups();
     let compress = state.compress();
@@ -775,7 +1021,7 @@ async fn check_restore_conflict(
     date: String,
 ) -> Result<gm_core::restore::ConflictInfo, String> {
     let root = state.backups_root();
-    let db_path = state.db_path.clone();
+    let db_path = state.db_path.lock().unwrap().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let db = gm_core::database::Database::open_readonly(&db_path)?;
         let entry = db
@@ -878,7 +1124,7 @@ fn refresh_auto_backup_blocking(app: &tauri::AppHandle) -> Result<usize, String>
         auto_backup::manager().lock().unwrap().stop_all();
         return Ok(0);
     }
-    let db_path = state.db_path.clone();
+    let db_path = state.db_path.lock().unwrap().clone();
     let root = state.backups_root();
     let max = state.max_backups();
     let compress = state.compress();
@@ -919,13 +1165,6 @@ fn refresh_auto_backup_blocking(app: &tauri::AppHandle) -> Result<usize, String>
     Ok(started)
 }
 
-#[tauri::command]
-async fn refresh_auto_backup(app: tauri::AppHandle) -> Result<usize, String> {
-    tauri::async_runtime::spawn_blocking(move || refresh_auto_backup_blocking(&app))
-        .await
-        .map_err(|e| format!("任务失败: {e}"))?
-}
-
 // 批量操作 / 备份迁移 / 打开目录
 // ======================================================================
 
@@ -943,7 +1182,7 @@ async fn batch_backup(
     state: tauri::State<'_, AppState>,
     ids: Vec<i64>,
 ) -> Result<Vec<BatchResult>, String> {
-    let db_path = state.db_path.clone();
+    let db_path = state.db_path.lock().unwrap().clone();
     let root = state.backups_root();
     let max = state.max_backups();
     let compress = state.compress();
@@ -989,7 +1228,7 @@ async fn batch_restore_latest(
     ids: Vec<i64>,
 ) -> Result<Vec<BatchResult>, String> {
     let root = state.backups_root();
-    let db_path = state.db_path.clone();
+    let db_path = state.db_path.lock().unwrap().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let db = gm_core::database::Database::open_readonly(&db_path)?;
         let env = gm_core::detect::detect();
@@ -1070,12 +1309,19 @@ fn open_game_backup_folder(
     state: tauri::State<AppState>,
     wiki_page_id: i64,
 ) -> Result<(), String> {
-    let dir = state.backups_root().join(wiki_page_id.to_string());
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    // 只打开已存在的游戏备份目录；绝不创建——未备份的游戏在右键菜单里不出现此项
+    let dir = gm_core::backup::game_dir_for(&state.backups_root(), wiki_page_id)
+        .ok_or_else(|| "该游戏还没有备份记录".to_string())?;
     use tauri_plugin_opener::OpenerExt;
     app.opener()
         .open_path(dir.to_string_lossy(), None::<&str>)
         .map_err(|e| e.to_string())
+}
+
+/// 各游戏的备份数量（右键菜单"是否已备份"的判断依据）
+#[tauri::command]
+fn backup_counts(state: tauri::State<AppState>) -> std::collections::HashMap<i64, u32> {
+    gm_core::backup::backup_counts(&state.backups_root())
 }
 
 /// 打开存档所在文件夹：路径是目录就开它本身，是文件就开父目录
@@ -1136,7 +1382,22 @@ pub fn run() {
 
             let settings_path = app_data_dir.join("settings.json");
             let settings = AppSettings::load(&settings_path);
-            let db_path = database_path(app.handle()).unwrap_or_else(|_| PathBuf::new());
+            let mut db_path = database_path(app.handle()).unwrap_or_else(|_| PathBuf::new());
+
+            // 用户更新过的存档数据库优先于内置资源（更新功能写入 app_data/database.db）
+            let user_db = app_data_dir.join("database.db");
+            if user_db != db_path && user_db.exists() {
+                let valid = gm_core::database::Database::open_readonly(&user_db)
+                    .and_then(|db| db.total_games())
+                    .map(|n| n > 0)
+                    .unwrap_or(false);
+                if valid {
+                    eprintln!("[database] 使用用户更新的存档数据库: {}", user_db.display());
+                    db_path = user_db;
+                } else {
+                    eprintln!("[database] 用户数据库损坏，回退内置资源");
+                }
+            }
 
             // 修改器目录：内置 resources/trainers + 用户更新目录 app_data/trainers
             // （后者覆盖同来源，缺目录降级为空注册表）
@@ -1168,13 +1429,22 @@ pub fn run() {
 
             app.manage(AppState {
                 settings: Mutex::new(settings),
-                db_path,
+                db_path: Mutex::new(db_path),
                 settings_path,
                 custom_games_path: app_data_dir.join("custom_games.json"),
                 app_data_dir: app_data_dir.clone(),
                 trainers: std::sync::RwLock::new(trainers),
-                trainer_zh,
+                trainer_zh: std::sync::RwLock::new(trainer_zh),
             });
+
+            // 旧版备份布局迁移：数字 id 目录 → 游戏名目录（game.json 声明归属）
+            {
+                let root = app.state::<AppState>().backups_root();
+                let moved = gm_core::backup::migrate_numeric_game_dirs(&root);
+                if moved > 0 {
+                    eprintln!("[backup-migrate] 已迁移 {moved} 个游戏的备份目录到游戏名布局");
+                }
+            }
 
             // 系统托盘：显示主窗口 / 打开备份文件夹 / 退出
             use tauri::{
@@ -1244,6 +1514,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             app_info,
+            check_app_update,
             list_modules,
             list_trainer_sources,
             search_trainers,
@@ -1256,11 +1527,10 @@ pub fn run() {
             check_trainer_updates,
             update_trainer_catalog,
             add_defender_exclusion,
-            list_games,
-            detect_environment,
             scan_installed_games,
+            save_database_info,
+            update_save_database,
             scan_deep_games,
-            game_detail,
             list_custom_games,
             save_custom_games,
             pick_file,
@@ -1275,13 +1545,13 @@ pub fn run() {
             batch_restore_latest,
             migrate_backups,
             open_game_backup_folder,
+            backup_counts,
             open_save_folder,
             get_settings,
             save_settings,
             pick_folder,
             get_autostart,
-            set_autostart,
-            refresh_auto_backup
+            set_autostart
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -174,40 +174,42 @@ pub fn steam_library_roots(vdf: &Vdf) -> Vec<String> {
     roots
 }
 
-/// Steam libraryfolders.vdf → (库根目录, 该库下的全部 appid)
-pub fn steam_library_apps(vdf: &Vdf) -> Vec<(String, Vec<String>)> {
-    let mut out = Vec::new();
-    if let Some(folders) = vdf.get("libraryfolders") {
-        for (_, entry) in folders.pairs() {
-            let Some(path) = entry.get("path").and_then(Vdf::as_str) else {
-                continue;
-            };
-            let root = path.replace("\\\\", "\\");
-            let apps = entry
-                .get("apps")
-                .map(|apps| apps.pairs().iter().map(|(id, _)| id.clone()).collect())
-                .unwrap_or_default();
-            out.push((root, apps));
-        }
-    }
-    out
+/// appmanifest_*.acf → installdir。acf 的字段嵌套在 AppState 层内
+/// （顶层直接找 installdir 会永远落空，导致 appid→安装目录映射为空）
+pub fn acf_installdir(acf: &Vdf) -> Option<&str> {
+    acf.get("AppState")
+        .and_then(|s| s.get("installdir"))
+        .or_else(|| acf.get("installdir"))
+        .and_then(Vdf::as_str)
 }
 
 /// loginusers.vdf → AutoLogin == 1 的账号
 pub fn steam_autologin_account(vdf: &Vdf) -> Option<(String, String, String, String)> {
     let users = vdf.get("users")?;
     for (steam_id64, user) in users.pairs() {
-        let autologin = user.get("AutoLogin").and_then(Vdf::as_str)?;
+        // 任一用户缺字段就跳过该用户，不能让第一个"不完整"的用户吞掉后面的 AutoLogin 账号
+        let Some(autologin) = user.get("AutoLogin").and_then(Vdf::as_str) else {
+            continue;
+        };
         if autologin == "1" {
-            let account_id = steam_id64
+            let Some(account_id) = steam_id64
                 .parse::<u64>()
                 .ok()
-                .map(|id| (id & 0xFFFF_FFFF).to_string())?;
+                .map(|id| (id & 0xFFFF_FFFF).to_string())
+            else {
+                continue;
+            };
+            let (Some(name), Some(persona)) = (
+                user.get("AccountName").and_then(Vdf::as_str),
+                user.get("PersonaName").and_then(Vdf::as_str),
+            ) else {
+                continue;
+            };
             return Some((
                 steam_id64.clone(),
                 account_id,
-                user.get("AccountName").and_then(Vdf::as_str)?.to_string(),
-                user.get("PersonaName").and_then(Vdf::as_str)?.to_string(),
+                name.to_string(),
+                persona.to_string(),
             ));
         }
     }
@@ -244,6 +246,22 @@ mod tests {
         assert_eq!(roots.len(), 2);
         assert_eq!(roots[0], "C:\\Program Files (x86)\\Steam");
         assert_eq!(roots[1], "D:\\SteamLibrary");
+    }
+
+    #[test]
+    fn acf_installdir_reads_nested_appstate() {
+        // 回归：顶层直接 get("installdir") 永远落空（真实 acf 嵌套在 AppState 内），
+        // 曾导致 steam_apps 映射恒为空
+        let sample = r#"
+"AppState"
+{
+	"appid"		"239140"
+	"name"		"Dying Light"
+	"installdir"		"Dying Light"
+}
+"#;
+        let acf = parse_vdf(sample).unwrap();
+        assert_eq!(acf_installdir(&acf), Some("Dying Light"));
     }
 
     #[test]

@@ -15,6 +15,148 @@ use std::path::{Path, PathBuf};
 pub const MANIFEST_FILE: &str = "manifest.json";
 /// 早期格式的实例清单文件名（只读兼容，写入时迁移）
 pub const LEGACY_MANIFEST_FILE: &str = "backup_info.json";
+/// 游戏备份目录的归属索引（game.json）——目录名用游戏名后，靠它识别归属与防碰撞
+pub const GAME_INDEX_FILE: &str = "game.json";
+
+/// game.json：游戏备份目录的归属声明
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameIndex {
+    pub schema: String,
+    pub wiki_page_id: i64,
+    pub title: String,
+}
+
+const GAME_INDEX_SCHEMA: &str = "gm.game-index/1";
+
+/// 备份根目录下的游戏目录名：标题去 Windows 非法字符并压缩空白
+pub fn game_dir_name(title: &str) -> String {
+    crate::sanitize_folder(title)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// 读取目录的归属索引（不存在或损坏 → None）
+fn read_game_index(game_dir: &Path) -> Option<GameIndex> {
+    let text = fs::read_to_string(game_dir.join(GAME_INDEX_FILE)).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+fn write_game_index(game_dir: &Path, index: &GameIndex) -> Result<(), String> {
+    write_json_atomic(&game_dir.join(GAME_INDEX_FILE), index)
+}
+
+/// 解析 wiki_page_id 对应的游戏目录：扫描根目录下各 game.json 归属匹配。
+/// 兼容旧布局（目录名为数字 id）：数字目录直接匹配。
+pub fn game_dir_for(backups_root: &Path, wiki_page_id: i64) -> Option<PathBuf> {
+    let entries = fs::read_dir(backups_root).ok()?;
+    let numeric = backups_root.join(wiki_page_id.to_string());
+    if numeric.is_dir() {
+        return Some(numeric); // 旧布局（未迁移时兜底）
+    }
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        if !dir.is_dir() {
+            continue;
+        }
+        if read_game_index(&dir).map(|i| i.wiki_page_id) == Some(wiki_page_id) {
+            return Some(dir);
+        }
+    }
+    None
+}
+
+/// 旧布局迁移：数字命名的游戏目录 → 游戏名目录。
+/// 标题取实例清单（目录式读 manifest，纯 zip 实例读包内清单）；
+/// 空目录（旧版"打开备份文件夹"误建）与只剩 game.json 的空壳（实例删尽）
+/// 直接删除。返回迁移的目录数。
+pub fn migrate_numeric_game_dirs(backups_root: &Path) -> usize {
+    let Ok(entries) = fs::read_dir(backups_root) else { return 0 };
+    let mut migrated = 0;
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        if !dir.is_dir() {
+            continue;
+        }
+        let name = dir.file_name().unwrap_or_default().to_string_lossy().to_string();
+        // 只剩 game.json 的空壳目录（实例删尽）→ 清掉
+        if fs::read_dir(&dir).map(|mut d| {
+            d.all(|e| e.map(|e| e.file_name().to_string_lossy() == GAME_INDEX_FILE).unwrap_or(false))
+        }).unwrap_or(false) {
+            let _ = fs::remove_file(dir.join(GAME_INDEX_FILE));
+            let _ = fs::remove_dir(&dir);
+            continue;
+        }
+        let Ok(id) = name.parse::<i64>() else {
+            continue; // 非数字目录名：新布局，跳过
+        };
+        // 找一个可读的清单取标题（优先目录式实例，其次 zip 实例）
+        let mut title: Option<String> = None;
+        if let Ok(instances) = fs::read_dir(&dir) {
+            let mut instance_names: Vec<String> = instances
+                .flatten()
+                .map(|e| e.file_name().to_string_lossy().to_string())
+                .collect();
+            instance_names.sort_by(|a, b| b.cmp(a)); // 新实例在前
+            for name in &instance_names {
+                let instance = dir.join(name);
+                if instance.is_dir() {
+                    if let Some(t) = read_manifest_in(&instance).ok().map(|m| m.title) {
+                        title = Some(t);
+                        break;
+                    }
+                } else if name.to_lowercase().ends_with(".zip") {
+                    if let Some(t) = read_zip_manifest(&instance).ok().map(|m| m.title) {
+                        title = Some(t);
+                        break;
+                    }
+                }
+            }
+        }
+        let Some(title) = title else {
+            // 无任何可读清单：空目录删除（旧版误建），非空目录保留原名不动
+            let is_empty = fs::read_dir(&dir).map(|mut d| d.next().is_none()).unwrap_or(false);
+            if is_empty {
+                let _ = fs::remove_dir(&dir);
+            }
+            continue;
+        };
+        let base = game_dir_name(&title);
+        let mut target = backups_root.join(&base);
+        // 碰撞处理：目标已存在且归属不同 → 追加 id 后缀
+        if target != dir {
+            if let Some(owner) = read_game_index(&target).map(|i| i.wiki_page_id) {
+                if owner != id {
+                    target = backups_root.join(format!("{base} ({id})"));
+                }
+            } else if fs::read_dir(&target).map(|mut d| d.next().is_none()).unwrap_or(false) {
+                // 目标为空目录，可直接占用
+            } else if target.exists() {
+                target = backups_root.join(format!("{base} ({id})"));
+            }
+        }
+        if target == dir {
+            write_game_index(&dir, &GameIndex {
+                schema: GAME_INDEX_SCHEMA.into(),
+                wiki_page_id: id,
+                title,
+            })
+            .ok();
+            continue;
+        }
+        if fs::rename(&dir, &target).is_ok() {
+            write_game_index(&target, &GameIndex {
+                schema: GAME_INDEX_SCHEMA.into(),
+                wiki_page_id: id,
+                title,
+            })
+            .ok();
+            migrated += 1;
+        }
+    }
+    migrated
+}
 
 /// 备份实例清单：每个实例（目录或 zip）内的自描述索引
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -246,13 +388,26 @@ pub fn backup_game(
     max_backups: u32,
     compress: bool,
 ) -> Result<String, String> {
-    let game_backup_path = backups_root.join(entry.wiki_page_id.to_string());
+    // 游戏目录名用游戏标题；同名目录被其他游戏占用时追加 wiki id 后缀
+    let base = game_dir_name(&entry.title);
+    let mut game_dir = backups_root.join(&base);
+    if game_dir.exists() {
+        let owned = read_game_index(&game_dir).map(|i| i.wiki_page_id) == Some(entry.wiki_page_id);
+        if !owned {
+            let is_empty = fs::read_dir(&game_dir)
+                .map(|mut d| d.next().is_none())
+                .unwrap_or(false);
+            if !is_empty {
+                game_dir = backups_root.join(format!("{base} ({})", entry.wiki_page_id));
+            }
+        }
+    }
     // 精确到秒：同一分钟内多次点击备份各存一份
     let mut instance_folder = Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
     // 防碰撞：同名（同秒连点）自动追加序号 _2、_3……
     let mut seq = 1u32;
-    while game_backup_path.join(format!("{instance_folder}.zip")).exists()
-        || game_backup_path.join(&instance_folder).exists()
+    while game_dir.join(format!("{instance_folder}.zip")).exists()
+        || game_dir.join(&instance_folder).exists()
     {
         seq += 1;
         instance_folder = format!(
@@ -260,9 +415,15 @@ pub fn backup_game(
             Local::now().format("%Y-%m-%d_%H-%M-%S")
         );
     }
-    // 组装阶段先放临时目录，完成后 zip 或改名就位，避免半成品出现在备份列表
-    let instance_path = std::env::temp_dir()
-        .join(format!("gm-staging-{}-{}", entry.wiki_page_id, instance_folder));
+    // 组装阶段先放临时目录，完成后 zip 或改名就位，避免半成品出现在备份列表。
+    // staging 名带纳秒与进程内序号：并行备份同一游戏（批量+自动备份同秒触发）不互删
+    static STAGING_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let staging_seq = STAGING_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let staging_nanos = chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default();
+    let instance_path = std::env::temp_dir().join(format!(
+        "gm-staging-{}-{staging_nanos}-{staging_seq}",
+        entry.wiki_page_id
+    ));
     let _ = fs::remove_dir_all(&instance_path);
 
     let mut manifest = BackupManifest {
@@ -347,14 +508,19 @@ pub fn backup_game(
 
     write_json_atomic(&instance_path.join(MANIFEST_FILE), &manifest)?;
 
-    fs::create_dir_all(&game_backup_path).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&game_dir).map_err(|e| e.to_string())?;
+    write_game_index(&game_dir, &GameIndex {
+        schema: GAME_INDEX_SCHEMA.into(),
+        wiki_page_id: entry.wiki_page_id,
+        title: entry.title.clone(),
+    })?;
     let final_path = if compress {
-        let zip_path = game_backup_path.join(format!("{instance_folder}.zip"));
+        let zip_path = game_dir.join(format!("{instance_folder}.zip"));
         zip_dir(&instance_path, &zip_path)?;
         fs::remove_dir_all(&instance_path).map_err(|e| e.to_string())?;
         zip_path
     } else {
-        let dest = game_backup_path.join(&instance_folder);
+        let dest = game_dir.join(&instance_folder);
         // 临时目录通常同盘可改名；跨盘退化为复制
         if fs::rename(&instance_path, &dest).is_err() {
             copy_dir_recursive(&instance_path, &dest)?;
@@ -363,7 +529,7 @@ pub fn backup_game(
         dest
     };
 
-    apply_rotation(&game_backup_path, max_backups)?;
+    apply_rotation(&game_dir, max_backups)?;
     Ok(final_path.to_string_lossy().to_string())
 }
 
@@ -524,10 +690,9 @@ pub fn apply_rotation(game_backup_path: &Path, max_backups: u32) -> Result<(), S
 
 /// 枚举一个游戏的全部备份（zip 与目录实例混合，按时间戳倒序）
 pub fn list_backups(backups_root: &Path, wiki_page_id: i64) -> Result<Option<GameBackups>, String> {
-    let game_backup_path = backups_root.join(wiki_page_id.to_string());
-    if !game_backup_path.is_dir() {
+    let Some(game_backup_path) = game_dir_for(backups_root, wiki_page_id) else {
         return Ok(None);
-    }
+    };
 
     let mut backups: Vec<BackupSummary> = Vec::new();
     for entry in fs::read_dir(&game_backup_path).map_err(|e| e.to_string())?.flatten() {
@@ -600,7 +765,8 @@ pub fn format_backup_date(date: &str) -> String {
     .to_string()
 }
 
-/// 枚举备份根目录下所有带备份的游戏（按标题字母序）
+/// 枚举备份根目录下所有带备份的游戏（按标题字母序）。
+/// 目录归属由 game.json 识别；无索引的目录（未迁移的旧布局）按数字 id 兜底。
 pub fn list_all_backups(backups_root: &Path) -> Result<Vec<GameBackups>, String> {
     let mut games = Vec::new();
     if !backups_root.is_dir() {
@@ -610,10 +776,15 @@ pub fn list_all_backups(backups_root: &Path) -> Result<Vec<GameBackups>, String>
         if !entry.metadata().map(|m| m.is_dir()).unwrap_or(false) {
             continue;
         }
-        let Ok(wiki_page_id) = entry.file_name().to_string_lossy().parse::<i64>() else {
-            continue; // 非数字目录名不是游戏备份
+        let dir = entry.path();
+        let id = match read_game_index(&dir) {
+            Some(index) => index.wiki_page_id,
+            None => match dir.file_name().and_then(|n| n.to_string_lossy().parse::<i64>().ok()) {
+                Some(id) => id, // 旧布局数字目录
+                None => continue,
+            },
         };
-        if let Some(game) = list_backups(backups_root, wiki_page_id)? {
+        if let Some(game) = list_backups(backups_root, id)? {
             games.push(game);
         }
     }
@@ -621,10 +792,57 @@ pub fn list_all_backups(backups_root: &Path) -> Result<Vec<GameBackups>, String>
     Ok(games)
 }
 
+/// 各游戏的备份数量（恢复列表/右键菜单判断"是否已备份"用）
+pub fn backup_counts(backups_root: &Path) -> std::collections::HashMap<i64, u32> {
+    let mut out = std::collections::HashMap::new();
+    let Ok(entries) = fs::read_dir(backups_root) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        if !dir.is_dir() {
+            continue;
+        }
+        let Some(id) = read_game_index(&dir)
+            .map(|i| i.wiki_page_id)
+            .or_else(|| dir.file_name().and_then(|n| n.to_string_lossy().parse::<i64>().ok()))
+        else {
+            continue;
+        };
+        let count = fs::read_dir(&dir)
+            .map(|its| {
+                its.flatten()
+                    .filter(|it| {
+                        it.path().is_dir() || it.file_name().to_string_lossy().to_lowercase().ends_with(".zip")
+                    })
+                    .count() as u32
+            })
+            .unwrap_or(0);
+        *out.entry(id).or_insert(0) += count;
+    }
+    out
+}
+
+/// 游戏目录里只剩归属索引（game.json）时删掉整个目录——
+/// 最后一份备份被删除后不留空壳
+fn remove_game_dir_if_empty(game_dir: &Path) {
+    let Ok(mut entries) = fs::read_dir(game_dir) else { return };
+    let only_index = entries
+        .all(|e| match e {
+            Ok(e) => e.file_name().to_string_lossy() == GAME_INDEX_FILE,
+            Err(_) => false,
+        });
+    if only_index {
+        let _ = fs::remove_file(game_dir.join(GAME_INDEX_FILE));
+        let _ = fs::remove_dir(game_dir);
+    }
+}
+
 /// 删除指定备份（目录或 zip）
 pub fn delete_backup(backups_root: &Path, wiki_page_id: i64, date: &str) -> Result<(), String> {
     let folder = validate_date(date)?;
-    let base = backups_root.join(wiki_page_id.to_string());
+    let base = game_dir_for(backups_root, wiki_page_id)
+        .ok_or_else(|| format!("备份不存在: {date}"))?;
     let dir = base.join(folder);
     let zip = base.join(format!("{folder}.zip"));
     if dir.is_dir() {
@@ -632,6 +850,7 @@ pub fn delete_backup(backups_root: &Path, wiki_page_id: i64, date: &str) -> Resu
     } else if zip.is_file() {
         fs::remove_file(&zip).map_err(|e| e.to_string())?;
     }
+    remove_game_dir_if_empty(&base);
     Ok(())
 }
 
@@ -643,7 +862,8 @@ pub fn set_backup_permanent(
     permanent: bool,
 ) -> Result<(), String> {
     let folder = validate_date(date)?;
-    let base = backups_root.join(wiki_page_id.to_string());
+    let base = game_dir_for(backups_root, wiki_page_id)
+        .ok_or_else(|| format!("备份不存在: {date}"))?;
     let dir = base.join(folder);
     let zip = base.join(format!("{folder}.zip"));
     if dir.is_dir() {
@@ -661,19 +881,13 @@ pub fn set_backup_permanent(
 }
 
 /// 防路径穿越：date 只允许时间戳格式（数字、连字符、下划线）
-fn validate_date(date: &str) -> Result<&str, String> {
+pub fn validate_date(date: &str) -> Result<&str, String> {
     let ok = !date.is_empty()
         && date
             .chars()
             .all(|c| c.is_ascii_digit() || c == '-' || c == '_')
         && !date.contains("..");
     if ok { Ok(date) } else { Err(format!("非法的备份日期: {date}")) }
-}
-
-/// 供命令层使用的辅助：确认备份根目录存在
-pub fn ensure_backups_root(backups_root: &Path) -> Result<PathBuf, String> {
-    fs::create_dir_all(backups_root).map_err(|e| e.to_string())?;
-    Ok(backups_root.to_path_buf())
 }
 
 #[cfg(test)]
@@ -714,9 +928,13 @@ mod tests {
 
         let backups_root = root.join("backups");
         let instance = backup_game(&test_entry(), &resolved, &backups_root, 3, false).unwrap();
-        assert!(instance.contains("42"));
+        assert!(instance.contains("CoolGame"), "实例路径应含游戏名: {instance}");
 
-        // 目录结构：backups/42/<date>/存档/a.sav + manifest.json
+        // 目录结构：backups/CoolGame/<date>/存档/a.sav + manifest.json，game.json 声明归属
+        assert_eq!(
+            read_game_index(&backups_root.join("CoolGame")).map(|i| i.wiki_page_id),
+            Some(42)
+        );
         let listed = list_backups(&backups_root, 42).unwrap().unwrap();
         assert_eq!(listed.backups.len(), 1);
         assert_eq!(listed.backups[0].title, "CoolGame");
@@ -810,6 +1028,15 @@ mod tests {
         )
         .unwrap();
 
+        // 数字目录（旧布局）经迁移后按游戏名命名并写入 game.json
+        assert_eq!(migrate_numeric_game_dirs(&root), 1);
+        assert!(root.join("OldGame").is_dir());
+        assert!(!root.join("42").exists());
+        assert_eq!(
+            read_game_index(&root.join("OldGame")).map(|i| i.wiki_page_id),
+            Some(42)
+        );
+
         let listed = list_backups(&root, 42).unwrap().unwrap();
         assert_eq!(listed.backups.len(), 1);
         assert_eq!(listed.backups[0].title, "OldGame");
@@ -819,13 +1046,86 @@ mod tests {
         assert_eq!(listed.backups[0].backup_paths[0].kind, "folder");
         assert_eq!(listed.backups[0].backup_paths[0].content_kind.as_deref(), Some("saves"));
 
-        // 固定 → 清单升级为 manifest.json，旧文件移除
+        // 固定 → 清单升级为 manifest.json，旧文件移除（目录已被迁移改名为 OldGame）
+        let migrated_dir = root.join("OldGame").join("2024-02-03_09-30");
         set_backup_permanent(&root, 42, "2024-02-03_09-30", true).unwrap();
-        assert!(dir.join(MANIFEST_FILE).exists());
-        assert!(!dir.join(LEGACY_MANIFEST_FILE).exists());
+        assert!(migrated_dir.join(MANIFEST_FILE).exists());
+        assert!(!migrated_dir.join(LEGACY_MANIFEST_FILE).exists());
         let reloaded = list_backups(&root, 42).unwrap().unwrap();
         assert!(reloaded.backups[0].is_permanent);
         assert_eq!(reloaded.backups[0].backup_paths.len(), 1);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn game_dir_naming_claim_conflict_and_counts() {
+        let root = std::env::temp_dir().join(format!("gm-naming-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+
+        // 空目录可被同名游戏认领；被其他游戏占用时追加 id 后缀
+        let claimed = root.join("CoolGame");
+        fs::create_dir_all(&claimed).unwrap();
+        let e1 = test_entry(); // wiki_page_id 42, title CoolGame
+        let mut e2 = test_entry();
+        e2.wiki_page_id = 99;
+        e2.title = "CoolGame: Remastered".into();
+
+        let resolved = vec![ResolvedPath {
+            template: "{{p|game}}\\saves".into(),
+            final_template: "{{p|game}}\\saves".into(),
+            resolved: root.join("src").join("a.sav").to_string_lossy().to_string(),
+            kind: ResolvedKind::File,
+            content_kind: "saves".into(),
+        }];
+        let src = root.join("src");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("a.sav"), b"x").unwrap();
+
+        // 空的 CoolGame 目录被 42 认领
+        let p1 = backup_game(&e1, &resolved, &root, 3, false).unwrap();
+        assert!(p1.contains("CoolGame") && !p1.contains("("));
+        // 另一游戏标题不同 → 各自目录（sanitize 后冒号被去掉）
+        let p2 = backup_game(&e2, &resolved, &root, 3, false).unwrap();
+        assert!(p2.contains("CoolGame Remastered"), "p2={p2}");
+        // 模拟同名冲突：把 99 号游戏标题改成与 42 相同 → 加 (99) 后缀
+        let mut e3 = test_entry();
+        e3.wiki_page_id = 99;
+        let p3 = backup_game(&e3, &resolved, &root, 3, false).unwrap();
+        assert!(p3.contains("CoolGame (99)"), "碰撞应加 id 后缀: {p3}");
+
+        // 备份计数按归属统计
+        let counts = backup_counts(&root);
+        assert_eq!(counts.get(&42), Some(&1));
+        assert_eq!(counts.get(&99), Some(&2));
+
+        // 删除/固定经由 game_dir_for 解析
+        let listed = list_backups(&root, 99).unwrap().unwrap();
+        let target = &listed.backups[0].date;
+        delete_backup(&root, 99, target).unwrap();
+        assert_eq!(backup_counts(&root).get(&99), Some(&1));
+        // 删掉最后一个实例 → 游戏目录（含 game.json）一并清除，不留空壳
+        let listed = list_backups(&root, 99).unwrap().unwrap();
+        let target = &listed.backups[0].date;
+        delete_backup(&root, 99, target).unwrap();
+        assert!(list_backups(&root, 99).unwrap().is_none());
+        assert!(!root.join("CoolGame (99)").exists());
+        assert_eq!(backup_counts(&root).get(&99), None);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn migration_skips_empty_dirs_and_keeps_unreadable() {
+        let root = std::env::temp_dir().join(format!("gm-mig2-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        // 误建空目录 → 删除
+        fs::create_dir_all(root.join("77")).unwrap();
+        // 无清单的非空目录 → 保留原名不动
+        let junk = root.join("88");
+        fs::create_dir_all(junk.join("random")).unwrap();
+        assert_eq!(migrate_numeric_game_dirs(&root), 0);
+        assert!(!root.join("77").exists());
+        assert!(junk.is_dir());
         let _ = fs::remove_dir_all(&root);
     }
 

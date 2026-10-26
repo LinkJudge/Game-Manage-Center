@@ -110,6 +110,72 @@ pub fn find_installed(
     (first_path, platforms)
 }
 
+/// 目录里是否至少有一个真实文件（浅递归）。
+/// 用于剔除"卸载后残留的空壳文件夹"——目录还在但游戏文件已清空
+fn dir_has_any_file(dir: &Path, depth: u32) -> bool {
+    if depth > 4 {
+        return false;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if p.is_file() {
+            return true;
+        }
+        if p.is_dir() && dir_has_any_file(&p, depth + 1) {
+            return true;
+        }
+    }
+    false
+}
+
+/// 带核验的安装检测（扫描用，剔除卸载残留误判）：
+/// - Steam：已知 steam_id 时以 appmanifest 为准——卸载时 Steam 会删掉 acf，
+///   之后残留在 steamapps/common 的同名文件夹不再算作已安装；
+/// - 其他平台 / 未知 steam_id：文件夹必须真实含文件（空目录树不算已安装）
+pub fn find_installed_verified(
+    install_folder: &str,
+    roots: &[InstallRoot],
+    steam_id: Option<&str>,
+    steam_apps: &HashMap<String, String>,
+) -> (Option<String>, Vec<String>) {
+    if install_folder.is_empty() {
+        return (None, Vec::new());
+    }
+    let mut first_path: Option<String> = None;
+    let mut platforms: Vec<String> = Vec::new();
+
+    // Steam：appmanifest 权威判定（acf 在 = 装了，acf 删了 = 卸了）
+    if let Some(sid) = steam_id {
+        if let Some(p) = steam_apps.get(sid) {
+            if Path::new(p).exists() {
+                first_path = Some(p.clone());
+                platforms.push("Steam".to_string());
+            }
+        }
+    }
+
+    for root in roots {
+        // 已知 steam_id 的游戏在 Steam 库目录上只认 appmanifest，
+        // 不走文件夹存在性兜底——否则卸载残留文件夹必然误判
+        if root.platform == "Steam" && steam_id.is_some() {
+            continue;
+        }
+        let candidate = Path::new(&root.path).join(install_folder);
+        if candidate.is_dir() && dir_has_any_file(&candidate, 0) {
+            if first_path.is_none() {
+                first_path = Some(candidate.to_string_lossy().to_string());
+            }
+            if !platforms.contains(&root.platform) {
+                platforms.push(root.platform.clone());
+            }
+        }
+    }
+    (first_path, platforms)
+}
+
 /// 扫描结果：一个游戏
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -230,8 +296,25 @@ pub fn scan_game(
     let (install_path, installed_platforms) = entry
         .install_folder
         .as_deref()
-        .map(|folder| find_installed(folder, &env.install_paths))
+        .map(|folder| {
+            find_installed_verified(
+                folder,
+                &env.install_paths,
+                entry.steam_id.as_deref(),
+                &env.steam_apps,
+            )
+        })
         .unwrap_or((None, Vec::new()));
+
+    // {{p|game}} 的解析目录与"是否已安装"解耦：未判安装时回退到残留的同名文件夹——
+    // 卸载后留在安装目录里的存档仍能扫到（模板只匹配真实存在的文件，
+    // 文件夹真为空时不会解析出任何结果，不会误判）
+    let game_dir = install_path.clone().or_else(|| {
+        entry
+            .install_folder
+            .as_deref()
+            .and_then(|f| find_install_path(f, &env.install_paths))
+    });
 
     let accounts: AccountIds = env.accounts.clone();
     let steam_path = env.steam_path.clone();
@@ -240,7 +323,7 @@ pub fn scan_game(
         platform: env.platform,
         env: &|key: &str| std::env::var(key).ok(),
         home,
-        game_dir: install_path.clone(),
+        game_dir,
         steam_dir: steam_path,
         ubisoft_dir: ubisoft_path,
         accounts: &accounts,
@@ -434,7 +517,16 @@ pub fn deep_scan(
                 out
             }));
         }
-        handles.into_iter().flat_map(|h| h.join().unwrap_or_default()).collect()
+        handles
+            .into_iter()
+            .flat_map(|h| {
+                h.join().unwrap_or_else(|_| {
+                    // 线程 panic 时保留其余分片结果，并在控制台留下痕迹（不能静默丢游戏）
+                    eprintln!("[gm-core] 深扫工作线程异常退出，该分片结果缺失");
+                    Vec::new()
+                })
+            })
+            .collect()
     });
 
     let mut games: Vec<ScannedGame> = results;
@@ -517,6 +609,7 @@ mod tests {
         let env = crate::detect::detect();
         println!("平台: {:?}", env.platform);
         println!("库根目录: {:?}", env.install_paths);
+        println!("steam_apps 条目数: {}", env.steam_apps.len());
         println!(
             "账号: steam={:?} ubisoft={:?} epic={:?} xbox={:?} gog={:?} ea={:?}",
             env.accounts.steam, env.accounts.ubisoft, env.accounts.epic,
@@ -538,10 +631,12 @@ mod tests {
         );
         for game in output.games.iter().filter(|g| !g.resolved_files.is_empty()) {
             println!(
-                "  - {} ({} | {}) {}",
+                "  - {} ({} | {}) [{}] install={:?} {}",
                 game.entry.title,
                 game.entry.zh_cn.as_deref().unwrap_or("-"),
                 format_bytes(game.backup_size),
+                game.installed_platforms.join("+"),
+                game.install_path,
                 game.resolved_files.first().map(|r| r.resolved.clone()).unwrap_or_default()
             );
             for r in game.resolved_files.iter().skip(1) {
@@ -666,6 +761,129 @@ mod tests {
         assert!(scanned.latest_modified_ms.is_some());
         assert!(scanned.install_path.is_some()); // install_folder 命中根目录
         assert!(scanned.resolved_files[0].final_template.contains("{{p|game}}"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    // ==================================================================
+    // 卸载残留核验（find_installed_verified）
+    // ==================================================================
+
+    fn steam_root(path: &Path) -> crate::detect::InstallRoot {
+        crate::detect::InstallRoot {
+            path: path.to_string_lossy().to_string(),
+            platform: "Steam".into(),
+        }
+    }
+
+    #[test]
+    fn leftover_empty_folder_is_not_installed() {
+        // 回归：卸载后 steamapps 里残留的空目录树（只剩空子目录）曾被判为已安装
+        let root = std::env::temp_dir().join(format!("gm-leftover-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("lib/GhostGame/_CommonRedist/vcredist")).unwrap();
+
+        let roots = vec![steam_root(&root.join("lib"))];
+        let apps = HashMap::new();
+        let (path, platforms) =
+            find_installed_verified("GhostGame", &roots, None, &apps);
+        assert!(path.is_none(), "空壳目录树不应判为已安装: {path:?}");
+        assert!(platforms.is_empty());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn folder_with_real_files_is_installed() {
+        let root = std::env::temp_dir().join(format!("gm-real-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        write_file(&root.join("lib/RealGame/bin/game.exe"), 10);
+
+        let roots = vec![steam_root(&root.join("lib"))];
+        let apps = HashMap::new();
+        let (path, platforms) = find_installed_verified("RealGame", &roots, None, &apps);
+        assert!(path.is_some());
+        assert_eq!(platforms, vec!["Steam".to_string()]);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn steam_folder_without_appmanifest_is_not_installed() {
+        // 回归（Lust Epidemic 案例）：已知 steam_id 的游戏，acf 已被 Steam 删除
+        // （= 已卸载），即使残留文件夹里还有文件也不算已安装
+        let root = std::env::temp_dir().join(format!("gm-noacf-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        write_file(&root.join("lib/GhostGame/leftover.dll"), 10);
+
+        let roots = vec![steam_root(&root.join("lib"))];
+        let apps = HashMap::new(); // 无 appmanifest = Steam 已卸载
+        let (path, platforms) =
+            find_installed_verified("GhostGame", &roots, Some("12345"), &apps);
+        assert!(path.is_none(), "acf 缺失的残留文件夹不应判为已安装: {path:?}");
+        assert!(platforms.is_empty());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn steam_appmanifest_is_authoritative_path() {
+        // appmanifest 定位的安装目录即使与 install_folder 名称不同也以其为准
+        let root = std::env::temp_dir().join(format!("gm-acf-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        write_file(&root.join("lib/Actual Dir Name/game.exe"), 10);
+
+        let roots = vec![steam_root(&root.join("lib"))];
+        let mut apps = HashMap::new();
+        apps.insert(
+            "12345".to_string(),
+            root.join("lib/Actual Dir Name").to_string_lossy().to_string(),
+        );
+        let (path, platforms) =
+            find_installed_verified("Whatever", &roots, Some("12345"), &apps);
+        assert!(path.unwrap().ends_with("Actual Dir Name"));
+        assert_eq!(platforms, vec!["Steam".to_string()]);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn uninstalled_game_saves_inside_leftover_folder_still_found() {
+        // 回归（Lust Epidemic 案例的另一半）：游戏已卸载（acf 没了）→ 不算已安装；
+        // 但存档留在安装目录里（{{p|game}} 模板）→ 必须仍能扫到（残留存档可备份）
+        let root = std::env::temp_dir().join(format!("gm-leftsave-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        write_file(&root.join("lib/GhostGame/saves/s1.sav"), 64);
+
+        let entry = GameEntry {
+            title: "GhostGame".into(),
+            wiki_page_id: 7,
+            install_folder: Some("GhostGame".into()),
+            steam_id: Some("12345".into()), // 已知 id 但无 acf = 已卸载
+            gog_id: None,
+            platforms: vec!["Steam".into()],
+            zh_cn: None,
+            paths: SaveLocations {
+                win: vec!["{{p|game}}\\saves\\*.sav".into()],
+                reg: vec![],
+                mac: vec![],
+                linux: vec![],
+                win_kinds: vec!["saves".into()],
+                reg_kinds: vec![],
+                mac_kinds: vec![],
+                linux_kinds: vec![],
+            },
+        };
+        let env = DetectedEnvironment {
+            platform: Platform::Windows,
+            install_paths: vec![steam_root(&root.join("lib"))],
+            steam_apps: HashMap::new(),
+            steam_path: None,
+            ubisoft_path: None,
+            accounts: AccountIds::default(),
+        };
+        let home = root.clone();
+        let scanned = scan_game(&entry, &env, &home, false);
+
+        assert!(scanned.install_path.is_none(), "已卸载不应判安装");
+        assert!(scanned.installed_platforms.is_empty());
+        assert_eq!(scanned.resolved_files.len(), 1, "残留文件夹里的存档必须扫到");
+        assert_eq!(scanned.backup_size, 64);
         let _ = fs::remove_dir_all(&root);
     }
 }
