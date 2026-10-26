@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { toast } from "sonner";
 import { Archive, Copy, Gamepad2, Minus, Puzzle, RotateCcw, Square, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -7,12 +9,13 @@ import { BackupTab } from "@/backupTab";
 import { RestoreTab } from "@/restoreTab";
 import { TrainersTab } from "@/trainersTab";
 import { SettingsDialog } from "@/settingsDialog";
-import { useScanStore } from "@/store";
+import { useScanStore, useUpdateStore } from "@/store";
 
 function App() {
   const autoScanOnStartup = useScanStore((s) => s.autoScanOnStartup);
   const autoScanIntervalMin = useScanStore((s) => s.autoScanIntervalMin);
   const runScan = useScanStore((s) => s.runScan);
+  const updateCheckMode = useUpdateStore((s) => s.updateCheckMode);
   const [settingsOpen, setSettingsOpen] = useState(false);
   // 最大化状态下显示"还原"图标（Windows 标准行为）
   const [isMaximized, setIsMaximized] = useState(false);
@@ -41,6 +44,38 @@ function App() {
     const id = setInterval(() => runScan(), autoScanIntervalMin * 60_000);
     return () => clearInterval(id);
   }, [autoScanIntervalMin]);
+
+  // 按设置频率检查软件更新（每次启动 / 每隔 N 天 / 从不）；发现新版弹可点击通知
+  useEffect(() => {
+    if (updateCheckMode === "never") return;
+    const t = setTimeout(() => {
+      const { lastUpdateCheckAt, markUpdateChecked } = useUpdateStore.getState();
+      const intervalMs = updateCheckMode === "startup" ? 0 : Number(updateCheckMode) * 86_400_000;
+      if (lastUpdateCheckAt && Date.now() - lastUpdateCheckAt < intervalMs) return;
+      invoke<{ hasUpdate: boolean; latestVersion: string | null; releaseUrl: string }>(
+        "check_app_update",
+      )
+        .then((r) => {
+          markUpdateChecked();
+          if (r.hasUpdate) {
+            toast.info(`发现新版本 v${r.latestVersion}`, {
+              description: "点击「前往」下载，或稍后在 设置 → 关于 处理",
+              duration: 12_000,
+              action: {
+                label: "前往",
+                onClick: () => {
+                  import("@tauri-apps/plugin-opener").then(({ openUrl }) =>
+                    openUrl(r.releaseUrl).catch(() => {}),
+                  );
+                },
+              },
+            });
+          }
+        })
+        .catch(() => {}); // 静默：网络不通不打扰用户
+    }, 2_500);
+    return () => clearTimeout(t);
+  }, [updateCheckMode]);
 
   return (
     <main className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
@@ -108,7 +143,7 @@ function App() {
               </TabsTrigger>
             </TabsList>
             <div className="h-6 flex-1" data-tauri-drag-region />
-            <Button variant="ghost" size="sm" onClick={() => setSettingsOpen(true)}>
+            <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true)}>
               设置
             </Button>
           </div>
@@ -154,7 +189,6 @@ function App() {
           </Tabs>
         </TabsContent>
 
-        {/* 修改器模块：目录搜索 + 一键下载安装 */}
         {/* 修改器模块：目录搜索 + 一键下载安装（标题区/内容区间距与存档页同构，含二级 Tabs 的 gap-2） */}
         <TabsContent value="trainers" className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
           <div className="px-6 pb-1 pt-4">

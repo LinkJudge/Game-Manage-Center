@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import {
@@ -88,6 +88,10 @@ function PlatformBadges({ platforms }: { platforms: string[] }) {
 
 export function BackupTab() {
   const queryClient = useQueryClient();
+  const backupCounts = useQuery({
+    queryKey: ["backup-counts"],
+    queryFn: () => invoke<Record<string, number>>("backup_counts"),
+  });
   const {
     scanOutput, deepOutput, clearDeepResult, scannedAt, scanning, runScan,
     setDeepResult,
@@ -116,6 +120,7 @@ export function BackupTab() {
   const invalidateAfterBackup = (id?: number) => {
     if (id != null) queryClient.invalidateQueries({ queryKey: ["backups", id] });
     queryClient.invalidateQueries({ queryKey: ["all-backups"] });
+    queryClient.invalidateQueries({ queryKey: ["backup-counts"] });
   };
 
   const doBackup = useMutation({
@@ -206,17 +211,21 @@ export function BackupTab() {
 
   // 合并常规扫描与深度扫描的残留：常规结果为基础，深度独有（未安装）的追加在后，
   // 两者独立保存——常规扫描不会冲掉残留，直到用户主动清除或重新深度扫描
-  const quickGames = scanOutput && !scanOutput.deep ? scanOutput.games : [];
-  const deepGames = deepOutput?.games ?? (scanOutput?.deep ? scanOutput.games : []);
-  const leftoverGames = deepGames.filter(
+  // （store 写入时 scanOutput.deep 恒为 false、deepOutput.deep 恒为 true）
+  // 行序：已安装在前、未安装残留统一排在最后（快扫自己也可能有残留——已卸载但存档还在）
+  const quickGames = scanOutput?.games ?? [];
+  const deepGames = deepOutput?.games ?? [];
+  const quickInstalled = quickGames.filter((g) => g.installPath);
+  const quickLeftover = quickGames.filter((g) => !g.installPath);
+  const deepLeftover = deepGames.filter(
     (g) =>
       !g.installPath &&
       !quickGames.some((q) => q.entry.wikiPageId === g.entry.wikiPageId),
   );
-  const merged = [
-    ...(scanOutput ? (scanOutput.deep ? deepGames.filter((g) => g.installPath) : quickGames) : quickGames),
-    ...leftoverGames,
-  ];
+  const merged = [...quickInstalled, ...quickLeftover, ...deepLeftover];
+  // 底部统计的"未安装残留"= 快扫残留 + 深扫残留；
+  // 「清理」按钮只清深扫结果（快扫残留重扫即回，清了也没意义）
+  const leftoverCount = quickLeftover.length + deepLeftover.length;
 
   const games = merged.filter((g: ScannedGame) => {
     if (g.resolvedFiles.length === 0 && g.registryCandidates.length === 0) return false;
@@ -229,32 +238,53 @@ export function BackupTab() {
   });
   const allSelected = games.length > 0 && games.every((g) => selected.has(g.entry.wikiPageId));
 
+  // 路径的语义类型：兼容历史持久化数据（旧版本序列化为 content_kind）
+  const pathKind = (f: { contentKind?: string; content_kind?: string }): string | undefined =>
+    f.contentKind ?? f.content_kind;
+
   const buildRowMenuItems = (game: ScannedGame): RowMenuItem[] => {
     const items: RowMenuItem[] = [
       { label: "备份此游戏", icon: Archive, onSelect: () => doBackup.mutate(game.entry.wikiPageId) },
       { label: "恢复最新备份", icon: RotateCcw, onSelect: () => startRestoreLatest(game) },
     ];
-    const firstFile = game.resolvedFiles[0]?.resolved;
-    if (firstFile) {
+    // 存档与设置分开打开（resolvedFiles 里两类路径混排，首个未必是存档）；
+    // 深度扫描的未安装残留同样按此提供（残留存档在磁盘上真实存在，可直接打开）
+    const savesPath = game.resolvedFiles.find((f) => pathKind(f) === "saves")?.resolved;
+    const configPath = game.resolvedFiles.find((f) => pathKind(f) === "config")?.resolved;
+    if (savesPath) {
       items.push({
         label: "打开存档文件夹",
         icon: FolderOpen,
         onSelect: () => {
-          invoke("open_save_folder", { path: firstFile }).catch((e) =>
+          invoke("open_save_folder", { path: savesPath }).catch((e) =>
             toast.error("打开失败", { description: String(e) }),
           );
         },
       });
     }
-    items.push({
-      label: "打开备份文件夹",
-      icon: FolderOpen,
-      onSelect: () => {
-        invoke("open_game_backup_folder", { wikiPageId: game.entry.wikiPageId }).catch((e) =>
-          toast.error("打开失败", { description: String(e) }),
-        );
-      },
-    });
+    if (configPath) {
+      items.push({
+        label: "打开设置文件夹",
+        icon: FolderOpen,
+        onSelect: () => {
+          invoke("open_save_folder", { path: configPath }).catch((e) =>
+            toast.error("打开失败", { description: String(e) }),
+          );
+        },
+      });
+    }
+    // 只有已备份的游戏才显示（命令层也不再有创建目录的副作用）
+    if ((backupCounts.data?.[String(game.entry.wikiPageId)] ?? 0) > 0) {
+      items.push({
+        label: "打开备份文件夹",
+        icon: FolderOpen,
+        onSelect: () => {
+          invoke("open_game_backup_folder", { wikiPageId: game.entry.wikiPageId }).catch((e) =>
+            toast.error("打开失败", { description: String(e) }),
+          );
+        },
+      });
+    }
     return items;
   };
 
@@ -279,15 +309,15 @@ export function BackupTab() {
             clearDeepResult();
             toast.success("已清理未安装游戏的残留记录");
           }}
-          disabled={leftoverGames.length === 0}
+          disabled={deepLeftover.length === 0}
           title={
-            leftoverGames.length > 0
-              ? `清除 ${leftoverGames.length} 个未安装游戏的残留存档记录（不会删除存档文件）`
+            deepLeftover.length > 0
+              ? `清除 ${deepLeftover.length} 个未安装游戏的残留存档记录（不会删除存档文件）`
               : "当前没有未安装游戏的残留记录（先执行深度扫描）"
           }
         >
           <Eraser className="mr-1.5 size-3.5" />
-          清理未安装游戏{leftoverGames.length > 0 && `（${leftoverGames.length}）`}
+          清理未安装游戏{deepLeftover.length > 0 && `（${deepLeftover.length}）`}
         </Button>
         <Button size="sm" variant="outline" onClick={() => setCustomOpen(true)}>
           <FolderPlus className="mr-1.5 size-3.5" />
@@ -383,7 +413,7 @@ export function BackupTab() {
               })}
               {games.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
+                  <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
                     没有匹配的游戏
                   </TableCell>
                 </TableRow>
@@ -402,7 +432,7 @@ export function BackupTab() {
           {scannedAt && <span>·</span>}
           <span>
             {games.length} 个游戏有存档
-            {leftoverGames.length > 0 && `（含 ${leftoverGames.length} 个未安装残留）`}
+            {leftoverCount > 0 && `（含 ${leftoverCount} 个未安装残留）`}
           </span>
         </div>
       )}

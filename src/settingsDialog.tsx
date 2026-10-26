@@ -5,10 +5,13 @@ import { toast } from "sonner";
 import {
   Archive,
   DatabaseZap,
+  ExternalLink,
   FolderOpen,
   Gamepad2,
+  Info,
   Loader2,
   Puzzle,
+  RefreshCw,
   ShieldCheck,
   SlidersHorizontal,
 } from "lucide-react";
@@ -42,11 +45,11 @@ import {
 } from "@/components/ui/alert-dialog";
 import type { AppSettings } from "@/types";
 import { useTheme, type ThemeMode } from "@/theme";
-import { useScanStore } from "@/store";
+import { useScanStore, useUpdateStore, type UpdateCheckMode } from "@/store";
 
 // ---------------------------------------------------------------- 设置分区导航
 
-type SettingsTab = "general" | "saves" | "trainers" | "mods";
+type SettingsTab = "general" | "saves" | "trainers" | "mods" | "about";
 
 const SETTINGS_TABS: {
   id: SettingsTab;
@@ -59,6 +62,7 @@ const SETTINGS_TABS: {
   { id: "saves", label: "存档", icon: Archive },
   { id: "trainers", label: "修改器", icon: Gamepad2 },
   { id: "mods", label: "MOD", icon: Puzzle, disabled: true, title: "规划中：MOD 的安装、版本管理与冲突排查" },
+  { id: "about", label: "关于", icon: Info },
 ];
 
 /** 分区页头 */
@@ -102,6 +106,20 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     queryFn: () => invoke<boolean>("get_autostart"),
     enabled: open,
   });
+  const appInfo = useQuery({
+    queryKey: ["app-info"],
+    queryFn: () =>
+      invoke<{ name: string; version: string; coreVersion: string }>("app_info"),
+    enabled: open,
+  });
+  const dbInfo = useQuery({
+    queryKey: ["save-database-info"],
+    queryFn: () =>
+      invoke<{ count: number; source: string; updatedAt: string | null }>(
+        "save_database_info",
+      ),
+    enabled: open,
+  });
 
   const [tab, setTab] = useState<SettingsTab>("general");
   const [backupPath, setBackupPath] = useState<string>("");
@@ -138,6 +156,20 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
 
   const [migrateAsk, setMigrateAsk] = useState<string | null>(null);
   const [updatingCatalog, setUpdatingCatalog] = useState(false);
+  const [updatingApp, setUpdatingApp] = useState(false);
+  const [updatingDb, setUpdatingDb] = useState(false);
+
+  // 存档数据库在线更新：下载 → 校验（条数 > 0）→ 原子替换 → 热切换
+  const updateDatabase = () => {
+    setUpdatingDb(true);
+    invoke<{ count: number; updatedAt: string | null }>("update_save_database")
+      .then((r) => {
+        toast.success(`存档数据库已更新：${r.count.toLocaleString()} 条`);
+        queryClient.invalidateQueries({ queryKey: ["save-database-info"] });
+      })
+      .catch((e) => toast.error("数据库更新失败", { description: String(e) }))
+      .finally(() => setUpdatingDb(false));
+  };
   const [addingDefender, setAddingDefender] = useState(false);
 
   const save = useMutation({
@@ -194,6 +226,43 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       )
       .catch((e) => toast.error("目录更新失败", { description: String(e) }))
       .finally(() => setUpdatingCatalog(false));
+  };
+
+  // 应用更新检查（匿名查 GitHub Release）
+  const [updateResult, setUpdateResult] = useState<{
+    hasUpdate: boolean;
+    latestVersion: string | null;
+    releaseUrl: string;
+  } | null>(null);
+  const updateCheckMode = useUpdateStore((s) => s.updateCheckMode);
+  const markUpdateChecked = useUpdateStore((s) => s.markUpdateChecked);
+  const setUpdateCheckMode = useUpdateStore((s) => s.setUpdateCheckMode);
+  const checkUpdate = () => {
+    setUpdateResult(null);
+    setUpdatingApp(true);
+    invoke<{ hasUpdate: boolean; latestVersion: string | null; releaseUrl: string }>(
+      "check_app_update",
+    )
+      .then((r) => {
+        markUpdateChecked();
+        setUpdateResult(r);
+      })
+      .catch((e) => toast.error("检查更新失败", { description: String(e) }))
+      .finally(() => setUpdatingApp(false));
+  };
+
+  const openProjectPage = () => {
+    import("@tauri-apps/plugin-opener").then(({ openUrl }) =>
+      openUrl("https://github.com/LinkJudge/Game-Manage-Center").catch((e) =>
+        toast.error("打开失败", { description: String(e) }),
+      ),
+    );
+  };
+
+  const openReleasePage = (url: string) => {
+    import("@tauri-apps/plugin-opener").then(({ openUrl }) =>
+      openUrl(url).catch((e) => toast.error("打开失败", { description: String(e) })),
+    );
   };
 
   // Defender 白名单：把修改器目录加入排除项，防止修改器文件被杀软误删（UAC 确认）
@@ -316,6 +385,26 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                     }
                   />
                   <Row
+                    label="软件更新检查"
+                    description="按频率连接 GitHub 检查新版本；发现新版会通知"
+                    control={
+                      <Select
+                        value={updateCheckMode}
+                        onValueChange={(v) => setUpdateCheckMode(v as UpdateCheckMode)}
+                      >
+                        <SelectTrigger className="w-[120px] shrink-0">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="startup">每次启动</SelectItem>
+                          <SelectItem value="7">每 7 天</SelectItem>
+                          <SelectItem value="30">每 30 天</SelectItem>
+                          <SelectItem value="never">从不</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    }
+                  />
+                  <Row
                     label="开机自动启动"
                     description="随 Windows 登录自动运行"
                     control={
@@ -350,14 +439,38 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                       <Label>滚动备份上限</Label>
                       <p className="text-xs text-muted-foreground">超出上限自动删除最旧备份；固定（Pin）的不受影响</p>
                     </div>
-                    <Input
-                      type="number"
-                      min={1}
-                      max={100}
-                      value={maxBackups}
-                      onChange={(e) => setMaxBackups(e.target.value)}
-                      className="w-20 shrink-0 text-center"
-                    />
+                    {/* 主题化步进器：隐藏原生 spinner（深色主题下与 UI 不协调） */}
+                    <div className="flex shrink-0 items-center rounded-lg border border-input dark:bg-input/30">
+                      <button
+                        type="button"
+                        onClick={() => setMaxBackups(String(Math.max(1, (Number(maxBackups) || 5) - 1)))}
+                        disabled={(Number(maxBackups) || 1) <= 1}
+                        title="减少"
+                        className="flex h-8 w-8 items-center justify-center rounded-l-lg text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground disabled:opacity-40"
+                      >
+                        −
+                      </button>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={100}
+                        value={maxBackups}
+                        onChange={(e) => {
+                          const v = e.target.value.replace(/[^\d]/g, "");
+                          setMaxBackups(v === "" ? "" : String(Math.min(100, Math.max(1, Number(v)))));
+                        }}
+                        className="w-12 border-0 bg-transparent text-center [appearance:textfield] focus-visible:ring-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none dark:bg-transparent"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setMaxBackups(String(Math.min(100, (Number(maxBackups) || 5) + 1)))}
+                        disabled={(Number(maxBackups) || 0) >= 100}
+                        title="增加"
+                        className="flex h-8 w-8 items-center justify-center rounded-r-lg text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground disabled:opacity-40"
+                      >
+                        +
+                      </button>
+                    </div>
                   </div>
                   <div className="flex items-center justify-between">
                     <div>
@@ -365,6 +478,26 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                       <p className="text-xs text-muted-foreground">体积更小，但备份与恢复略慢</p>
                     </div>
                     <Switch checked={compress} onCheckedChange={setCompress} />
+                  </div>
+                  <div className="flex items-center justify-between gap-3 border-t pt-3">
+                    <div className="min-w-0">
+                      <Label>存档数据库</Label>
+                      <p className="text-xs text-muted-foreground">
+                        {dbInfo.data
+                          ? `当前 ${dbInfo.data.count.toLocaleString()} 条${
+                              dbInfo.data.source === "user" ? "（已更新）" : ""
+                            } · 从发布页拉取最新数据，校验通过才替换`
+                          : "读取中……"}
+                      </p>
+                    </div>
+                    <Button variant="outline" size="sm" onClick={updateDatabase} disabled={updatingDb} className="shrink-0">
+                      {updatingDb ? (
+                        <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+                      ) : (
+                        <DatabaseZap className="mr-1.5 size-3.5" />
+                      )}
+                      更新
+                    </Button>
                   </div>
                 </div>
               </div>
@@ -416,6 +549,88 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                       )}
                       执行
                     </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {tab === "about" && (
+              <div>
+                <PaneHeader title="关于" description="版本信息、项目链接与更新检查" />
+                <div className="space-y-4">
+                  {/* 品牌行 */}
+                  <div className="flex items-center gap-4 rounded-xl border bg-card p-4">
+                    <img src="/app-icon.png" alt="游戏管理中心" className="size-14 rounded-xl" />
+                    <div className="min-w-0">
+                      <div className="text-lg font-semibold">游戏管理中心</div>
+                      <p className="text-xs text-muted-foreground">
+                        Game Manage Center
+                        {appInfo.data
+                          ? ` · 应用 v${appInfo.data.version} · 引擎 v${appInfo.data.coreVersion}`
+                          : " · 加载中……"}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* 更新与链接 */}
+                  <div className="divide-y rounded-xl border bg-card px-3.5">
+                    <div className="flex items-center justify-between gap-3 py-3">
+                      <div className="min-w-0">
+                        <Label>检查更新</Label>
+                        <p className="text-xs text-muted-foreground">
+                          {updateResult
+                            ? updateResult.hasUpdate
+                              ? `发现新版本 v${updateResult.latestVersion}`
+                              : `已是最新版本（v${appInfo.data?.version ?? ""}）`
+                            : "连接 GitHub 查询最新发布版本"}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        {updateResult?.hasUpdate && (
+                          <Button
+                            variant="default"
+                            size="sm"
+                            onClick={() => openReleasePage(updateResult.releaseUrl)}
+                          >
+                            前往下载
+                          </Button>
+                        )}
+                        <Button variant="outline" size="sm" onClick={checkUpdate} disabled={updatingApp}>
+                          {updatingApp ? (
+                            <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+                          ) : (
+                            <RefreshCw className="mr-1.5 size-3.5" />
+                          )}
+                          {updateResult ? "重新检查" : "检查"}
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between gap-3 py-3">
+                      <div className="min-w-0">
+                        <Label>项目地址</Label>
+                        <p className="truncate text-xs text-muted-foreground">
+                          github.com/LinkJudge/Game-Manage-Center
+                        </p>
+                      </div>
+                      <Button variant="outline" size="sm" onClick={openProjectPage} className="shrink-0">
+                        <ExternalLink className="mr-1.5 size-3.5" />
+                        打开
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* 许可与致谢 */}
+                  <div className="rounded-xl border bg-card p-4 text-xs leading-relaxed text-muted-foreground">
+                    <p>
+                      本应用以 <span className="font-medium text-foreground">GPL-3.0</span> 协议开源。
+                    </p>
+                    <p className="mt-1.5">
+                      存档路径数据来自{" "}
+                      <span className="font-medium text-foreground">PCGamingWiki</span>
+                      社区（CC BY-NC-SA）；修改器目录数据采集自{" "}
+                      <span className="font-medium text-foreground">风灵月影</span>{" "}
+                      官网公开发布的信息，修改器软件版权归原作者所有。
+                    </p>
                   </div>
                 </div>
               </div>

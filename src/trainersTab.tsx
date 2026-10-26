@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
 import {
   Download,
-  Eraser,
   FolderOpen,
   Gamepad2,
   Loader2,
@@ -13,7 +13,6 @@ import {
   RefreshCw,
   Search,
   Trash2,
-  Wand2,
   X,
 } from "lucide-react";
 import {
@@ -32,6 +31,7 @@ import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
+import { RowMenu, type RowMenuItem } from "@/components/rowMenu";
 import {
   Table,
   TableBody,
@@ -123,6 +123,14 @@ function RowProgress({ progress }: { progress: TrainerProgress }) {
       </div>
     );
   }
+  // 连接/重定向阶段：还没有字节进度
+  if (progress.total === 0 && progress.downloaded === 0) {
+    return (
+      <div className="flex items-center justify-end gap-1.5 text-xs text-muted-foreground">
+        <Loader2 className="size-3.5 animate-spin" /> 连接中…
+      </div>
+    );
+  }
   return (
     <div className="ml-auto w-32 text-right">
       <Progress value={pct} className="h-1.5" />
@@ -206,16 +214,12 @@ function ActionsCell({
 
 export function TrainersTab() {
   const scanOutput = useScanStore((s) => s.scanOutput);
-  // 搜索词与匹配结果放在全局 store（持久化）：切到别的标签页再回来不丢
+  // 搜索词持久化：切到别的标签页再回来不丢
   const query = useTrainerStore((s) => s.trainerQuery);
   const setQuery = useTrainerStore((s) => s.setTrainerQuery);
-  const matches = useTrainerStore((s) => s.trainerMatches);
-  const setMatches = useTrainerStore((s) => s.setTrainerMatches);
   const [hits, setHits] = useState<TrainerHit[]>([]);
   const [searching, setSearching] = useState(false);
   const [sources, setSources] = useState<TrainerSourceSummary[]>([]);
-  const [matching, setMatching] = useState(false);
-  const [onlyInstalled, setOnlyInstalled] = useState(false);
   const [installed, setInstalled] = useState<InstalledTrainer[]>([]);
   const [updates, setUpdates] = useState<TrainerUpdateInfo[]>([]);
   const [progress, setProgress] = useState<Record<string, TrainerProgress>>({});
@@ -223,6 +227,9 @@ export function TrainersTab() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [batchRunning, setBatchRunning] = useState(false);
   const [batchDeleteAsk, setBatchDeleteAsk] = useState(false);
+  const [onlyInstalled, setOnlyInstalled] = useState(false);
+  // 行右键菜单（与存档/恢复页同款浮层）
+  const [rowMenu, setRowMenu] = useState<{ x: number; y: number; row: ResultRow } | null>(null);
 
   const refreshInstalled = useCallback(() => {
     invoke<InstalledTrainer[]>("list_installed_trainers")
@@ -239,6 +246,8 @@ export function TrainersTab() {
   }, [refreshInstalled]);
 
   // 搜索（300ms 防抖；清空输入即回空；切回标签页时恢复的词会自动重搜）
+  // seq 守卫：已发出的旧查询响应晚到时直接丢弃，不覆盖新词的结果
+  const searchSeq = useRef(0);
   useEffect(() => {
     const q = query.trim();
     setSelected(new Set()); // 换一批结果，选择作废
@@ -247,12 +256,20 @@ export function TrainersTab() {
       setSearching(false);
       return;
     }
+    setOnlyInstalled(false); // 搜索优先于「只看已安装」
     setSearching(true);
     const t = setTimeout(() => {
+      const seq = ++searchSeq.current;
       invoke<TrainerHit[]>("search_trainers", { query: q, limit: 60 })
-        .then(setHits)
-        .catch((e) => toast.error("搜索失败", { description: String(e) }))
-        .finally(() => setSearching(false));
+        .then((hits) => {
+          if (seq === searchSeq.current) setHits(hits);
+        })
+        .catch((e) => {
+          if (seq === searchSeq.current) toast.error("搜索失败", { description: String(e) });
+        })
+        .finally(() => {
+          if (seq === searchSeq.current) setSearching(false);
+        });
     }, 300);
     return () => clearTimeout(t);
   }, [query]);
@@ -279,6 +296,11 @@ export function TrainersTab() {
 
   const startDownload = (hit: TrainerHit) => {
     if (!hit.downloadUrl) return;
+    // 立即把按钮换成进度条（连接/重定向阶段后端还没有字节进度）
+    setProgress((prev) => ({
+      ...prev,
+      [hit.id]: { trainerId: hit.id, stage: "download", downloaded: 0, total: 0 },
+    }));
     invoke<InstalledTrainer>("download_trainer", {
       trainerId: hit.id,
       downloadUrl: hit.downloadUrl,
@@ -298,6 +320,10 @@ export function TrainersTab() {
   };
 
   const startUpdate = (u: TrainerUpdateInfo) => {
+    setProgress((prev) => ({
+      ...prev,
+      [u.trainerId]: { trainerId: u.trainerId, stage: "download", downloaded: 0, total: 0 },
+    }));
     invoke<InstalledTrainer>("update_trainer", {
       trainerId: u.trainerId,
       downloadUrl: u.newDownload.url,
@@ -350,53 +376,72 @@ export function TrainersTab() {
     });
   };
 
-  // 与已安装游戏联动：把存档页扫到的游戏喂给引擎做精确匹配
-  const matchInstalledGames = () => {
-    const games: TrainerGameQuery[] = (scanOutput?.games ?? []).map((g) => ({
-      title: g.entry.title,
-      zhName: g.entry.zhCn,
-    }));
-    if (games.length === 0) {
-      toast.info("还没有已安装的游戏列表", {
-        description: "先到存档页点「扫描本机」，再来匹配修改器",
-      });
-      return;
-    }
-    setMatching(true);
-    setQuery("");
-    setOnlyInstalled(false);
-    setSelected(new Set());
-    invoke<GameTrainerMatch[]>("match_trainers", { games })
-      .then((all) => {
-        const withHits = all.filter((m) => m.matches.length > 0);
-        setMatches(withHits);
-        toast.success(
-          withHits.length > 0
-            ? `为 ${withHits.length} 个已安装游戏找到了修改器`
-            : "已安装的游戏暂无目录内修改器",
-        );
-      })
-      .catch((e) => toast.error("匹配失败", { description: String(e) }))
-      .finally(() => setMatching(false));
-  };
-
-  const toggleOnlyInstalled = () => {
-    const next = !onlyInstalled;
-    setOnlyInstalled(next);
-    setSelected(new Set());
-    if (next) {
-      setQuery("");
-      setMatches(null);
-    }
-  };
-
   // 每个条目当前装着的最新包（同名多包时 scan 已按安装时间降序，取首个）
   const findInstalled = (trainerId: string): InstalledTrainer | undefined =>
     installed.find((t) => t.manifest.trainerId === trainerId);
   const updateOf = (folder: string): TrainerUpdateInfo | undefined =>
     updates.find((u) => u.oldFolder === folder);
 
-  // 视图行：搜索词 > 只看已安装 > 匹配结果 > 空态
+  // 行右键菜单项：与操作列按钮同一套动作，按行的状态裁剪（无可动作的行不弹菜单）
+  const buildRowMenuItems = (row: ResultRow): RowMenuItem[] => {
+    const items: RowMenuItem[] = [];
+    if (row.installedOf) {
+      const t = row.installedOf;
+      items.push({ label: "启动修改器", icon: Play, onSelect: () => launch(t) });
+      if (row.update) {
+        const u = row.update;
+        items.push({ label: "更新到最新包", icon: RefreshCw, onSelect: () => startUpdate(u) });
+      }
+      items.push({ label: "打开所在目录", icon: FolderOpen, onSelect: () => openFolder(t) });
+      items.push({
+        label: "删除此修改器",
+        icon: Trash2,
+        danger: true,
+        onSelect: () => setPendingDelete(t),
+      });
+    } else if (row.hit?.downloadUrl) {
+      const hit = row.hit;
+      items.push({ label: "下载安装", icon: Download, onSelect: () => startDownload(hit) });
+    }
+    return items;
+  };
+
+  // 默认视图：已安装游戏 ↔ 修改器目录实时匹配（随扫描结果自动刷新）
+  const scannedGames: TrainerGameQuery[] = (scanOutput?.games ?? []).map((g) => ({
+    title: g.entry.title,
+    zhName: g.entry.zhCn,
+  }));
+  const matchQuery = useQuery({
+    queryKey: ["trainer-matches", scannedGames],
+    queryFn: () => invoke<GameTrainerMatch[]>("match_trainers", { games: scannedGames }),
+    enabled: scannedGames.length > 0,
+    // 重新扫描后键值变化，先留住上一批结果，避免表格闪空
+    placeholderData: keepPreviousData,
+  });
+  const matchRows: ResultRow[] = (matchQuery.data ?? [])
+    .filter((m) => m.matches.length > 0)
+    .flatMap((m) =>
+      m.matches.map((hit) => {
+        const installedOf = findInstalled(hit.id);
+        return {
+          key: `${m.title}-${hit.id}`,
+          hit,
+          subline:
+            m.title !== hit.gameName ? `${hit.gameName} · 来自 ${m.title}` : hit.gameName,
+          installedOf,
+          update: installedOf ? updateOf(installedOf.folder) : undefined,
+        };
+      }),
+    );
+
+  const toggleOnlyInstalled = () => {
+    const next = !onlyInstalled;
+    setOnlyInstalled(next);
+    setSelected(new Set());
+    if (next) setQuery("");
+  };
+
+  // 视图行：搜索词 > 只看已安装 > 默认匹配视图
   const searching_ = query.trim().length > 0;
   let rows: ResultRow[] = [];
   if (searching_) {
@@ -417,26 +462,15 @@ export function TrainersTab() {
       installedOf: t,
       update: updateOf(t.folder),
     }));
-  } else if (matches !== null) {
-    rows = matches.flatMap((m) =>
-      m.matches.map((hit) => {
-        const installedOf = findInstalled(hit.id);
-        return {
-          key: `${m.title}-${hit.id}`,
-          hit,
-          subline:
-            m.title !== hit.gameName
-              ? `${hit.gameName} · 来自 ${m.title}`
-              : hit.gameName,
-          installedOf,
-          update: installedOf ? updateOf(installedOf.folder) : undefined,
-        };
-      }),
-    );
+  } else {
+    rows = matchRows;
   }
 
-  const showTable =
-    searching_ || onlyInstalled || matches !== null || searching || matching;
+  // 扫描过（或有搜索）就显示表格；从未扫描才显示引导卡片
+  const showTable = searching_ || searching || onlyInstalled || scannedGames.length > 0;
+  // 默认匹配视图的请求进行中（加载中行只在对应视图下出现，不与空状态叠加）
+  const matchPending =
+    !searching_ && !onlyInstalled && (matchQuery.isLoading || matchQuery.isFetching);
 
   // 多选：批量下载未安装的、批量删除已安装的（顺序执行，单条失败不中断）
   const selectedRows = rows.filter((r) => selected.has(r.key));
@@ -528,30 +562,6 @@ export function TrainersTab() {
           <PackageCheck className="mr-1.5 size-3.5" />
           只看已安装{installed.length > 0 ? `（${installed.length}）` : ""}
         </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={matchInstalledGames}
-          disabled={matching}
-          title="用存档页扫描到的游戏列表，精确匹配目录里的修改器"
-        >
-          {matching ? (
-            <Loader2 className="mr-1.5 size-3.5 animate-spin" />
-          ) : (
-            <Wand2 className="mr-1.5 size-3.5" />
-          )}
-          匹配已安装游戏
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => setMatches(null)}
-          disabled={matches === null}
-          title="清除匹配结果"
-        >
-          <Eraser className="mr-1.5 size-3.5" />
-          清除
-        </Button>
       </div>
 
       {showTable ? (
@@ -583,7 +593,15 @@ export function TrainersTab() {
               {rows.map((row) => {
                 const manifest = row.installedOf?.manifest;
                 return (
-                  <TableRow key={row.key}>
+                  <TableRow
+                    key={row.key}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      if (buildRowMenuItems(row).length > 0) {
+                        setRowMenu({ x: e.clientX, y: e.clientY, row });
+                      }
+                    }}
+                  >
                     <TableCell onClick={(e) => e.stopPropagation()}>
                       <Checkbox
                         checked={selected.has(row.key)}
@@ -637,18 +655,24 @@ export function TrainersTab() {
                   </TableRow>
                 );
               })}
-              {rows.length === 0 && !searching && !matching && (
+              {rows.length === 0 && !searching && !matchPending && (
                 <TableRow>
                   <TableCell colSpan={10} className="h-20 text-center text-muted-foreground">
-                    {onlyInstalled ? "还没有已安装的修改器" : "没有匹配的结果"}
+                    {onlyInstalled
+                      ? "还没有已安装的修改器"
+                      : searching_
+                        ? "没有匹配的结果"
+                        : scannedGames.length === 0
+                          ? "还没有已安装游戏的记录——先到存档页点「扫描本机」"
+                          : "已安装的游戏暂无目录内修改器"}
                   </TableCell>
                 </TableRow>
               )}
-              {((searching && hits.length === 0) || (matching && rows.length === 0)) && (
+              {(searching || matchPending) && (
                 <TableRow>
                   <TableCell colSpan={10} className="h-20 text-center text-muted-foreground">
                     <Loader2 className="mr-2 inline size-4 animate-spin" />
-                    {matching ? "匹配中……" : "搜索中……"}
+                    {searching ? "搜索中……" : "匹配中……"}
                   </TableCell>
                 </TableRow>
               )}
@@ -658,7 +682,7 @@ export function TrainersTab() {
       ) : (
         <Card className="flex h-48 flex-col items-center justify-center gap-3 text-muted-foreground">
           <Gamepad2 className="size-8" />
-          <p>输入游戏名搜索修改器，或点「匹配已安装游戏」——用你扫过的游戏直接找</p>
+          <p>先到存档页点「扫描本机」，这里会自动列出你每个游戏可用的修改器；也可以直接搜索</p>
         </Card>
       )}
 
@@ -672,6 +696,16 @@ export function TrainersTab() {
           （下载自来源官网，杀软可能误报，请自行甄别）
         </span>
       </div>
+
+      {/* 行右键菜单（与存档/恢复页同款） */}
+      {rowMenu && (
+        <RowMenu
+          x={rowMenu.x}
+          y={rowMenu.y}
+          items={buildRowMenuItems(rowMenu.row)}
+          onClose={() => setRowMenu(null)}
+        />
+      )}
 
       {/* 悬浮批量操作栏：选中后出现在底部中央（与存档页同款） */}
       {selected.size > 0 && (

@@ -99,6 +99,8 @@ export function RestoreTab() {
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["all-backups"] });
+    // 计数刷新让备份页右键的"打开备份文件夹"同步消失/出现
+    queryClient.invalidateQueries({ queryKey: ["backup-counts"] });
   };
 
   const toggleSelect = (id: number, checked: boolean) => {
@@ -146,13 +148,6 @@ export function RestoreTab() {
       .catch((e) => toast.error("检查冲突失败", { description: String(e) }));
   };
 
-  // 恢复最新备份：列表可能为空（备份目录被外部清理），取不到就静默返回
-  const startRestoreLatest = (game: GameBackups) => {
-    const latest = game.backups[0];
-    if (!latest) return;
-    startRestore(game, latest.date);
-  };
-
   const doDelete = useMutation({
     mutationFn: (args: { id: number; date: string }) =>
       invoke<void>("delete_backup", { wikiPageId: args.id, date: args.date }),
@@ -197,6 +192,16 @@ export function RestoreTab() {
     },
     onError: (e) => toast.error("批量恢复失败", { description: String(e) }),
   });
+
+  // 取最新备份日期（空数组防护：后端契约保证非空，但坏了不该让界面直接崩）
+  const startRestoreLatest = (game: GameBackups) => {
+    const latest = game.backups[0];
+    if (!latest) {
+      toast.info(`${game.title} 还没有备份`);
+      return;
+    }
+    startRestore(game, latest.date);
+  };
 
   const buildRowMenuItems = (game: GameBackups): RowMenuItem[] => {
     const items: RowMenuItem[] = [
@@ -298,7 +303,7 @@ export function RestoreTab() {
                   <Button
                     size="sm"
                     onClick={() => startRestoreLatest(game)}
-                    disabled={restore.isPending || game.backups.length === 0}
+                    disabled={restore.isPending}
                   >
                     {restore.isPending && restore.variables?.id === game.wikiPageId ? (
                       <Loader2 className="mr-1 size-3.5 animate-spin" />

@@ -6,9 +6,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-/// 文件监控自动备份模式
-pub const MODE_WATCHER: &str = "watcher";
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {

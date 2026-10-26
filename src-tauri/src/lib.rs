@@ -3,7 +3,6 @@
 use gm_core::settings::AppSettings;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::atomic::Ordering;
 use std::sync::Mutex;
 
 /// 应用全局状态：设置 + 数据库位置（tauri State 管理）
@@ -395,7 +394,7 @@ fn download_ranged_parallel(
     emit: &dyn Fn(&str, u64, u64),
 ) -> Result<(), String> {
     use std::io::{Read, Seek, SeekFrom, Write};
-    use std::sync::atomic::AtomicU64;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::{Arc, Mutex};
 
     // 预分配目标文件，各分段按偏移写入
@@ -575,11 +574,11 @@ async fn download_trainer(
     let meta = resolve_install_meta(&state, &trainer_id, &download_url)?;
     let root = trainers_root(&state);
     let sevenz = sevenz_path(&app);
-    let join = tauri::async_runtime::spawn_blocking(move || {
+    tauri::async_runtime::spawn_blocking(move || {
         download_and_install_blocking(&app, &root, &meta, &sevenz)
     })
-    .await;
-    join.map_err(|e| format!("下载任务失败: {e}"))?
+    .await
+    .map_err(|e| format!("下载任务失败: {e}"))?
 }
 
 /// 就地更新：下载安装最新包，成功后删除旧包（旧包删除失败不影响新版可用）。
@@ -594,7 +593,7 @@ async fn update_trainer(
     let meta = resolve_install_meta(&state, &trainer_id, &download_url)?;
     let root = trainers_root(&state);
     let sevenz = sevenz_path(&app);
-    let join = tauri::async_runtime::spawn_blocking(move || {
+    tauri::async_runtime::spawn_blocking(move || {
         let installed = download_and_install_blocking(&app, &root, &meta, &sevenz)?;
         // 新包已就位，旧包尽力清理（失败仅记录，用户可手动删）
         if let Err(e) =
@@ -604,8 +603,8 @@ async fn update_trainer(
         }
         Ok(installed)
     })
-    .await;
-    join.map_err(|e| format!("更新任务失败: {e}"))?
+    .await
+    .map_err(|e| format!("更新任务失败: {e}"))?
 }
 
 /// 启动已安装的修改器（ShellExecute，UAC 由 Windows 按 exe 声明处理）

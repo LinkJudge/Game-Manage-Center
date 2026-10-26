@@ -19,45 +19,12 @@ export interface GameEntry {
   paths: SaveLocations;
 }
 
-export interface GamesPage {
-  items: GameEntry[];
-  total: number;
-}
-
-export interface AppInfo {
-  name: string;
-  version: string;
-  coreVersion: string;
-}
-
 export interface ResolvedPath {
   template: string;
   finalTemplate: string;
   resolved: string;
   kind: "file" | "registry";
-}
-
-export interface AccountIds {
-  steam: string | null;
-  ubisoft: string | null;
-  epic: string | null;
-  xbox: string | null;
-  rockstar: string | null;
-  gog: string | null;
-  ea: string | null;
-}
-
-export interface InstallRoot {
-  path: string;
-  platform: string;
-}
-
-export interface DetectedEnvironment {
-  platform: string;
-  installPaths: InstallRoot[];
-  steamPath: string | null;
-  ubisoftPath: string | null;
-  accounts: AccountIds;
+  contentKind?: string; // saves | config | reg（语义类型）
 }
 
 export interface ScannedGame {
@@ -108,11 +75,6 @@ export interface ConflictInfo {
   conflict: boolean;
   localMs: number | null;
   backupMs: number | null;
-}
-
-export interface RestoreResult {
-  restoredPaths: number;
-  errors: string[];
 }
 
 export interface AppSettings { backupPath: string | null; maxBackups: number; compressBackups: boolean; autoBackupEnabled: boolean; closeToTray: boolean; trainerPath: string | null; }

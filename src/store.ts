@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
-import type { GameTrainerMatch, ScanOutput } from "@/types";
+import type { ScanOutput } from "@/types";
 
 interface ScanStore {
   /** 常规扫描结果（仅已安装游戏；localStorage 持久化，重启仍在） */
@@ -17,10 +17,8 @@ interface ScanStore {
   autoScanOnStartup: boolean;
   /** 自动重扫间隔（分钟），0 = 关闭 */
   autoScanIntervalMin: number;
-  setScanResult: (out: ScanOutput) => void;
   setDeepResult: (out: ScanOutput) => void;
   clearDeepResult: () => void;
-  setScanning: (v: boolean) => void;
   setPrefs: (p: Partial<Pick<ScanStore, "autoScanOnStartup" | "autoScanIntervalMin">>) => void;
   /** 触发一次常规扫描：结果直接写入 store，组件卸载也不中断 */
   runScan: () => Promise<void>;
@@ -35,11 +33,8 @@ export const useScanStore = create<ScanStore>()(
       scanning: false,
       autoScanOnStartup: true,
       autoScanIntervalMin: 0,
-      setScanResult: (out) =>
-        set({ scanOutput: { ...out, deep: false }, scannedAt: Date.now(), scanning: false }),
       setDeepResult: (out) => set({ deepOutput: { ...out, deep: true }, scannedAt: Date.now() }),
       clearDeepResult: () => set({ deepOutput: null }),
-      setScanning: (v) => set({ scanning: v }),
       setPrefs: (p) => set(p),
       runScan: async () => {
         if (useScanStore.getState().scanning) return;
@@ -71,22 +66,43 @@ export const useScanStore = create<ScanStore>()(
 interface TrainerStore {
   /** 修改器搜索词（持久化：切回标签页时自动重新搜索） */
   trainerQuery: string;
-  /** 「匹配已安装游戏」的结果快照（持久化：切页不丢，手动清除或重新匹配才更新） */
-  trainerMatches: GameTrainerMatch[] | null;
   setTrainerQuery: (q: string) => void;
-  setTrainerMatches: (m: GameTrainerMatch[] | null) => void;
 }
 
 export const useTrainerStore = create<TrainerStore>()(
   persist(
     (set) => ({
       trainerQuery: "",
-      trainerMatches: null,
       setTrainerQuery: (q) => set({ trainerQuery: q }),
-      setTrainerMatches: (m) => set({ trainerMatches: m }),
     }),
     {
       name: "gm-trainer-store",
+      storage: createJSONStorage(() => localStorage),
+    },
+  ),
+);
+
+export type UpdateCheckMode = "startup" | "7" | "30" | "never";
+
+interface UpdateStore {
+  /** 软件更新检查频率：每次启动 / 每 7 天 / 每 30 天 / 从不 */
+  updateCheckMode: UpdateCheckMode;
+  /** 上次检查完成时间（epoch ms；手动检查也计入） */
+  lastUpdateCheckAt: number | null;
+  setUpdateCheckMode: (m: UpdateCheckMode) => void;
+  markUpdateChecked: () => void;
+}
+
+export const useUpdateStore = create<UpdateStore>()(
+  persist(
+    (set) => ({
+      updateCheckMode: "7",
+      lastUpdateCheckAt: null,
+      setUpdateCheckMode: (m) => set({ updateCheckMode: m }),
+      markUpdateChecked: () => set({ lastUpdateCheckAt: Date.now() }),
+    }),
+    {
+      name: "gm-update-store",
       storage: createJSONStorage(() => localStorage),
     },
   ),
