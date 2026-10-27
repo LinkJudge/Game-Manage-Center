@@ -11,8 +11,15 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
+pub mod catalog;
 pub mod fling;
+pub mod fuzzy;
 pub mod install;
+
+/// 内置的通用来源：风灵月影历史归档（直接下载）
+pub const FLING_ARCHIVE_SOURCE_ID: &str = "fling_archive";
+/// 内置的通用来源：小幸修改器（官网/网盘页，仅索引）
+pub const XIAOXING_SOURCE_ID: &str = "xiaoxing";
 
 /// 当前支持的 catalog 格式版本（加载时不匹配即拒绝）
 pub const CATALOG_SCHEMA: &str = "gm.trainers/1";
@@ -49,6 +56,9 @@ pub struct TrainerDownload {
     pub game_version: Option<String>,
     #[serde(default)]
     pub options_count: Option<u32>,
+    /// 非直接下载：URL 指向详情页；前端应打开浏览器而不是直接安装
+    #[serde(default)]
+    pub external: bool,
 }
 
 /// 一个修改器条目（对应来源站点的一个详情页）
@@ -102,6 +112,8 @@ pub struct TrainerHit {
     pub game_version: Option<String>,
     /// 最新包的下载地址（下载命令的入参）
     pub download_url: Option<String>,
+    /// 非直接下载来源的详情页/网盘页地址
+    pub external_url: Option<String>,
     pub size_bytes: Option<u64>,
     pub download_count: Option<u64>,
     /// 附件总数（该游戏可用的包数量）
@@ -120,7 +132,10 @@ impl TrainerHit {
             updated_at: entry.updated_at.clone(),
             options_count: latest.and_then(|d| d.options_count),
             game_version: latest.and_then(|d| d.game_version.clone()),
-            download_url: latest.map(|d| d.url.clone()),
+            download_url: latest.filter(|d| !d.external).map(|d| d.url.clone()),
+            external_url: latest
+                .filter(|d| d.external)
+                .map(|_| entry.page_url.clone()),
             size_bytes: latest.and_then(|d| d.size_bytes),
             download_count: latest.and_then(|d| d.download_count),
             total_downloads: entry.downloads.len(),
@@ -162,13 +177,28 @@ pub struct TrainerUpdateInfo {
 // ======================================================================
 
 /// 名称归一化：保留 ASCII 字母数字与 CJK 表意文字，其余（空白、标点、全角、
-/// 符号）全部丢弃并转小写。例："Black Myth: Wukong" → "blackmythwukong"，
-/// "艾尔登法环" 原样。检索比较全部基于归一化结果。
+/// 符号）全部丢弃并转小写；ASCII 数字段转为罗马数字小写（"3"→"iii"），
+/// 使 "DOOM 3" 与 "DOOM III"、"gta5" 与 "GTA V" 等价。检索与匹配共用。
 pub fn normalize_name(text: &str) -> String {
-    text.chars()
-        .filter(|c| c.is_ascii_alphanumeric() || is_cjk_ideograph(*c))
-        .flat_map(|c| c.to_lowercase())
-        .collect()
+    let mut out = String::with_capacity(text.len());
+    let mut digits = String::new();
+    for c in text.chars() {
+        if c.is_ascii_digit() {
+            digits.push(c);
+            continue;
+        }
+        if !digits.is_empty() {
+            out.push_str(&fuzzy::to_roman(&digits));
+            digits.clear();
+        }
+        if c.is_ascii_alphabetic() || is_cjk_ideograph(c) {
+            out.extend(c.to_lowercase());
+        }
+    }
+    if !digits.is_empty() {
+        out.push_str(&fuzzy::to_roman(&digits));
+    }
+    out
 }
 
 fn is_cjk_ideograph(c: char) -> bool {
@@ -326,6 +356,15 @@ impl TrainerRegistry {
                                     None
                                 }
                             },
+                            FLING_ARCHIVE_SOURCE_ID | XIAOXING_SOURCE_ID => {
+                                match catalog::CatalogSource::from_json(&json, &id) {
+                                    Ok(s) => Some(Box::new(s)),
+                                    Err(e) => {
+                                        errors.push(format!("{name}: {e}"));
+                                        None
+                                    }
+                                }
+                            }
                             other => {
                                 errors.push(format!("{name}: 未知的修改器来源「{other}」，已跳过"));
                                 None
@@ -357,15 +396,17 @@ impl TrainerRegistry {
     }
 
     /// 关键词检索全部来源。语义：
-    /// - 归一化后做子串匹配（英文名、别名 + 已解析的中文名）
+    /// - 归一化后做子串匹配（英文名、别名 + 已解析的中文名），
+    ///   外加缩写 / 拼音桥接 / 模糊纠错三类召回（见 fuzzy.rs）
     /// - 归一化后不足 2 个字符的关键词一律无结果（防泛匹配刷屏）
-    /// - 结果按来源内原有顺序，跨来源按来源加载顺序拼接
+    /// - 按相关度降序返回（全等 > 前缀 > 子串 > 缩写 > 拼音 > 模糊），
+    ///   同分保持来源内名称序；先全量评分再截断，避免限量截掉高分结果
     pub fn search(&self, query: &str, zh: &ZhNameIndex, limit: usize) -> Vec<TrainerHit> {
-        let needle = normalize_name(query);
-        if needle.chars().count() < 2 {
+        let matcher = fuzzy::QueryMatcher::new(query);
+        if matcher.normalized_chars() < 2 {
             return Vec::new();
         }
-        let mut hits = Vec::new();
+        let mut scored: Vec<(f64, TrainerHit)> = Vec::new();
         for source in &self.sources {
             for entry in source.entries() {
                 let zh_name = entry
@@ -373,24 +414,25 @@ impl TrainerRegistry {
                     .as_deref()
                     .map(String::from)
                     .or_else(|| zh.get(&entry.game_name).map(String::from));
-                let matched = normalize_name(&entry.game_name).contains(&needle)
-                    || entry
-                        .aliases
-                        .iter()
-                        .any(|a| normalize_name(a).contains(&needle))
-                    || zh_name
-                        .as_deref()
-                        .map(|z| normalize_name(z).contains(&needle))
-                        .unwrap_or(false);
-                if matched {
-                    hits.push(TrainerHit::from_entry(&source.info().id, entry).with_zh_fallback(zh_name));
-                    if hits.len() >= limit {
-                        return hits;
+                let zh_disp = zh_name.as_deref();
+                // 条目名与别名取最高相关度
+                let mut score = matcher.match_score(&entry.game_name, zh_disp);
+                for a in &entry.aliases {
+                    if let Some(s) = matcher.match_score(a, zh_disp) {
+                        score = Some(score.map_or(s, |b| b.max(s)));
                     }
+                }
+                if let Some(s) = score {
+                    scored.push((
+                        s,
+                        TrainerHit::from_entry(&source.info().id, entry).with_zh_fallback(zh_name),
+                    ));
                 }
             }
         }
-        hits
+        scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        scored.truncate(limit);
+        scored.into_iter().map(|(_, h)| h).collect()
     }
 
     /// 已安装游戏 ↔ 修改器匹配。语义（见 SPEC.md）：归一化后**全等**才命中
@@ -742,12 +784,27 @@ mod tests {
         let (reg, errs) = TrainerRegistry::load_dir(&dir);
         assert!(errs.is_empty(), "catalog 加载报错: {errs:?}");
         assert!(reg.total() >= 700, "条目异常少: {}", reg.total());
+        let ids: Vec<_> = reg
+            .source_infos()
+            .into_iter()
+            .map(|(info, _)| info.id)
+            .collect();
+        assert!(ids.contains(&fling::SOURCE_ID.to_string()));
+        assert!(ids.contains(&FLING_ARCHIVE_SOURCE_ID.to_string()));
+        assert!(ids.contains(&XIAOXING_SOURCE_ID.to_string()));
 
         let zh = ZhNameIndex::empty();
         let hits = reg.search("wukong", &zh, 50);
         assert!(hits.iter().any(|h| h.game_name.contains("Wukong")), "黑神话未命中");
         let hits = reg.search("elden", &zh, 50);
         assert!(hits.iter().any(|h| normalize_name(&h.game_name).contains("eldenring")));
+        // 小幸为外部来源：可打开官网，但不能走 app 内直接下载
+        let xiaoxing = reg.search("black myth", &zh, 50);
+        assert!(xiaoxing.iter().any(|h| {
+            h.source_id == XIAOXING_SOURCE_ID
+                && h.external_url.is_some()
+                && h.download_url.is_none()
+        }));
         // 每个条目至少带一个可用下载地址（用高频词扫到大批条目再抽查）
         let hits = reg.search("the", &zh, 200);
         let no_dl = hits.iter().filter(|h| h.total_downloads == 0).count();
