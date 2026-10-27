@@ -6,9 +6,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-/// 文件监控自动备份模式
-pub const MODE_WATCHER: &str = "watcher";
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
@@ -24,6 +21,10 @@ pub struct AppSettings {
     pub close_to_tray: bool,
     /// 修改器安装根目录；None = 默认（应用数据目录/Trainers）
     pub trainer_path: Option<String>,
+    /// SteamGridDB API Key（仅保存在本机 settings.json，用于手动选图与补全封面）
+    pub steamgriddb_api_key: Option<String>,
+    /// 界面语言：None = 跟随系统；"zh" 中文；"en" English
+    pub locale: Option<String>,
 }
 
 impl Default for AppSettings {
@@ -37,6 +38,8 @@ impl Default for AppSettings {
             // 默认关窗进托盘（自动备份常驻）
             close_to_tray: true,
             trainer_path: None,
+            steamgriddb_api_key: None,
+            locale: None,
         }
     }
 }
@@ -102,6 +105,7 @@ mod tests {
             auto_backup_enabled: true,
             close_to_tray: false,
             trainer_path: Some("D:\\MyTrainers".into()),
+            steamgriddb_api_key: Some("sgdb-test".into()),
         };
         settings.save(&path).unwrap();
 
@@ -112,6 +116,7 @@ mod tests {
         assert!(loaded.auto_backup_enabled);
         assert!(!loaded.close_to_tray);
         assert_eq!(loaded.trainer_path.as_deref(), Some("D:\\MyTrainers"));
+        assert_eq!(loaded.steamgriddb_api_key.as_deref(), Some("sgdb-test"));
         let _ = std::fs::remove_file(&path);
     }
 }

@@ -69,6 +69,7 @@ pub enum ResolvedKind {
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ResolvedPath {
     /// 源模板
     pub template: String,
@@ -326,36 +327,6 @@ pub fn resolve_registry_template(template: &str, ctx: &ResolveContext) -> Vec<Re
         kind: ResolvedKind::Registry,
         content_kind: "reg".into(),
     }]
-}
-
-/// 收集安装目录内的 exe 文件名（深度 ≤2）
-pub fn collect_exe_names(install_path: &Path) -> Vec<String> {
-    let mut out = Vec::new();
-    fn walk(dir: &Path, depth: u32, out: &mut Vec<String>) {
-        if depth > 2 || out.len() >= 100 {
-            return;
-        }
-        let Ok(entries) = std::fs::read_dir(dir) else { return };
-        for entry in entries.flatten() {
-            let p = entry.path();
-            if p.is_dir() {
-                walk(&p, depth + 1, out);
-            } else if p
-                .extension()
-                .map(|x| x.eq_ignore_ascii_case("exe"))
-                .unwrap_or(false)
-            {
-                if let Some(n) = p.file_name() {
-                    let n = n.to_string_lossy().to_string();
-                    if !out.contains(&n) {
-                        out.push(n);
-                    }
-                }
-            }
-        }
-    }
-    walk(install_path, 0, &mut out);
-    out
 }
 
 // ======================================================================

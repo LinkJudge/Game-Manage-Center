@@ -6,32 +6,6 @@
 use crate::platform::Platform;
 use std::path::Path;
 
-/// 规格书 §1 中列出的全部变量名（供 UI 与调用方枚举）
-pub const KNOWN: &[&str] = &[
-    "username",
-    "userprofile",
-    "userprofile/documents",
-    "userprofile/appdata/locallow",
-    "appdata",
-    "localappdata",
-    "programfiles",
-    "programdata",
-    "public",
-    "windir",
-    "hkcu",
-    "hklm",
-    "wow64",
-    "osxhome",
-    "linuxhome",
-    "xdgdatahome",
-    "xdgconfighome",
-    // 上下文变量：game / steam / uid / uplay / ubisoftconnect 由调用方注入
-];
-
-pub fn is_known(name: &str) -> bool {
-    KNOWN.contains(&name) || matches!(name, "game" | "steam" | "uid" | "uplay" | "ubisoftconnect")
-}
-
 /// 归一化：小写、反斜杠转正斜杠
 pub fn normalize(name: &str) -> String {
     name.to_lowercase().replace('\\', "/")
@@ -95,20 +69,6 @@ pub fn resolve_one(
         "game" | "steam" | "uid" | "uplay" | "ubisoftconnect" => None,
         _ => None,
     }
-}
-
-/// 便捷入口：当前平台 + 真实环境
-pub fn resolve_now(name: &str) -> Option<String> {
-    let home = std::env::var_os("USERPROFILE")
-        .or_else(|| std::env::var_os("HOME"))
-        .map(std::path::PathBuf::from)
-        .unwrap_or_default();
-    resolve_one(name, Platform::current(), &|k| std::env::var(k).ok(), &home)
-}
-
-/// 变量是否为注册表根键类（决定条目归入注册表桶）
-pub fn is_registry_var(name: &str) -> bool {
-    matches!(normalize(name).as_str(), "hkcu" | "hklm" | "wow64")
 }
 
 #[cfg(test)]
@@ -179,15 +139,6 @@ mod tests {
     fn context_vars_are_caller_responsibility() {
         assert!(resolve_one("game", Platform::Windows, &none, Path::new(HOME)).is_none());
         assert!(resolve_one("steam", Platform::MacOS, &none, Path::new(HOME)).is_none());
-    }
-
-    #[test]
-    fn known_list_covers_all_non_context() {
-        for name in KNOWN {
-            assert!(is_known(name));
-        }
-        assert!(is_known("uid") && is_known("game") && is_known("steam"));
-        assert!(!is_known("madeup"));
     }
 
     #[test]
