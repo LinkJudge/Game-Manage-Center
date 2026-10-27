@@ -19,45 +19,12 @@ export interface GameEntry {
   paths: SaveLocations;
 }
 
-export interface GamesPage {
-  items: GameEntry[];
-  total: number;
-}
-
-export interface AppInfo {
-  name: string;
-  version: string;
-  coreVersion: string;
-}
-
 export interface ResolvedPath {
   template: string;
   finalTemplate: string;
   resolved: string;
   kind: "file" | "registry";
-}
-
-export interface AccountIds {
-  steam: string | null;
-  ubisoft: string | null;
-  epic: string | null;
-  xbox: string | null;
-  rockstar: string | null;
-  gog: string | null;
-  ea: string | null;
-}
-
-export interface InstallRoot {
-  path: string;
-  platform: string;
-}
-
-export interface DetectedEnvironment {
-  platform: string;
-  installPaths: InstallRoot[];
-  steamPath: string | null;
-  ubisoftPath: string | null;
-  accounts: AccountIds;
+  contentKind?: string; // saves | config | reg（语义类型）
 }
 
 export interface ScannedGame {
@@ -110,12 +77,7 @@ export interface ConflictInfo {
   backupMs: number | null;
 }
 
-export interface RestoreResult {
-  restoredPaths: number;
-  errors: string[];
-}
-
-export interface AppSettings { backupPath: string | null; maxBackups: number; compressBackups: boolean; autoBackupEnabled: boolean; closeToTray: boolean; trainerPath: string | null; }
+export interface AppSettings { backupPath: string | null; maxBackups: number; compressBackups: boolean; autoBackupEnabled: boolean; closeToTray: boolean; trainerPath: string | null; steamgriddbApiKey: string | null; locale: string | null; }
 
 
 export interface BatchResult {
@@ -147,6 +109,7 @@ export interface TrainerHit {
   optionsCount: number | null;
   gameVersion: string | null;
   downloadUrl: string | null;
+  externalUrl: string | null;
   sizeBytes: number | null;
   downloadCount: number | null;
   totalDownloads: number;
@@ -206,7 +169,40 @@ export interface TrainerUpdateInfo {
 
 export interface TrainerProgress {
   trainerId: string;
-  stage: "download" | "extract" | "done";
+  stage: "download" | "extract" | "done" | "cancelling";
   downloaded: number;
   total: number;
+}
+
+// ---------------------------------------------------------------- 游戏封面
+
+export interface SgdbCandidate {
+  id: number;
+  url: string;
+  thumb: string;
+  width: number;
+  height: number;
+  style: string | null;
+  mime: string;
+  author: string | null;
+}
+
+export interface SgdbOptions {
+  gameId: number;
+  gameName: string;
+  candidates: SgdbCandidate[];
+}
+
+export interface CoverLookup {
+  title: string;
+  wikiPageId: number | null;
+  steamId: string | null;
+}
+
+export interface CoverFillSummary {
+  total: number;
+  filled: number;
+  skipped: number;
+  failed: number;
+  errors: string[];
 }

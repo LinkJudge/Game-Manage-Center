@@ -1,0 +1,208 @@
+/** 修改器页文案 */
+export const trainersZh: Record<string, string> = {
+  "trainers.progress.cancelling": "正在取消…",
+  "trainers.progress.extracting": "解压安装中…",
+  "trainers.progress.connecting": "连接中…",
+
+  "trainers.toast.openFailed": "打开失败",
+  "trainers.toast.searchFailed": "搜索失败",
+  "trainers.toast.installed": "修改器已安装",
+  "trainers.toast.cancelled": "已取消下载",
+  "trainers.toast.downloadFailed": "下载失败",
+  "trainers.toast.downloadEnded": "下载任务已结束",
+  "trainers.toast.cancelFailed": "取消失败",
+  "trainers.toast.updated": "已更新到最新包",
+  "trainers.toast.updateCancelled": "已取消更新",
+  "trainers.toast.updateFailed": "更新失败",
+  "trainers.toast.launchFailed": "启动失败",
+  "trainers.toast.deleted": "已删除",
+  "trainers.toast.deleteFailed": "删除失败",
+  "trainers.toast.coverFillSummary": "图标补全：{ok} 成功，{skipped} 已有，{failed} 失败",
+  "trainers.toast.coverFilled": "已补全 {count} 个游戏图标",
+  "trainers.toast.coverAllExist": "当前列表的图标都已存在",
+  "trainers.toast.coverFailed": "图标补全失败",
+  "trainers.toast.batchDownloadPartial": "批量下载：{ok} 成功，{failed} 失败",
+  "trainers.toast.batchDownloadDone": "批量下载完成（{count} 个修改器）",
+  "trainers.toast.batchDeletePartial": "批量删除：{ok} 成功，{failed} 失败",
+  "trainers.toast.batchDeleted": "已删除 {count} 个修改器",
+
+  "trainers.source.chooseCount": "{count} 个来源可选",
+  "trainers.source.from": "{game} · 来自 {source}",
+
+  "trainers.group.installed": "已安装修改器",
+  "trainers.group.available": "可获取修改器",
+  "trainers.group.residual": "残留修改器",
+
+  "trainers.filter.placeholder": "搜索修改器（游戏名支持中英文）",
+  "trainers.filter.onlyInstalledTip": "只显示已安装的修改器",
+  "trainers.filter.onlyInstalled": "只看已安装（{count}）",
+  "trainers.filter.residualTip": "显示已安装修改器、但本机扫描不到对应游戏的残留项",
+  "trainers.filter.checkingTip": "正在核对游戏与修改器的对应关系…",
+  "trainers.filter.needScanTip": "先到存档页扫描本机游戏，才能判断修改器是否还有对应游戏",
+  "trainers.filter.residual": "残留修改器",
+  "trainers.tip.fillCovers": "用 SteamGridDB 自动补全当前列表缺失的图标",
+  "trainers.tip.fillCoversNeedKey": "请先在 设置 → 扩展 中配置 SteamGridDB API Key",
+  "trainers.action.fillCovers": "补全图标",
+  "trainers.action.filling": "补全中…",
+
+  "trainers.notice.title": "这些修改器没有找到对应的已安装游戏",
+  "trainers.notice.desc":
+    "可能游戏已卸载，或还没有下载安装。检测基于上次游戏扫描结果；删除只会移除修改器包，不影响游戏存档。",
+
+  "trainers.col.game": "游戏 / 修改器",
+  "trainers.col.source": "来源",
+  "trainers.col.pack": "包信息",
+  "trainers.col.updated": "更新日期",
+  "trainers.col.status": "状态",
+  "trainers.col.actions": "操作",
+
+  "trainers.subline.installed": "已安装的修改器",
+  "trainers.subline.catalog": "修改器目录条目",
+  "trainers.status.residual": "残留",
+  "trainers.status.update": "有更新",
+  "trainers.status.installed": "已安装",
+  "trainers.status.available": "可获取",
+  "trainers.status.manual": "需手动获取",
+  "trainers.status.downloadable": "可下载",
+
+  "trainers.row.options": "{count} 个选项",
+  "trainers.row.optionsUnknown": "选项未知",
+  "trainers.row.versionUnknown": "版本未知",
+  "trainers.row.installedAt": "装于 {date}",
+  "trainers.row.notInstalled": "尚未安装",
+
+  "trainers.empty.noResidual": "没有检测到残留修改器",
+  "trainers.empty.noInstalled": "还没有已安装的修改器",
+  "trainers.empty.noMatch": "没有匹配的结果",
+  "trainers.empty.noScan": "还没有已安装游戏的记录——先到存档页点「扫描本机」",
+  "trainers.empty.noCatalog": "已安装的游戏暂无目录内修改器",
+  "trainers.loading.searching": "搜索中……",
+  "trainers.loading.matching": "匹配中……",
+  "trainers.empty.hint":
+    "先到存档页点「扫描本机」，这里会自动列出你每个游戏可用的修改器；也可以直接搜索",
+
+  "trainers.footer.catalog": "目录收录 {count} 个修改器 · 已安装 {installed} 个",
+  "trainers.footer.residual": " · 残留 {count} 个",
+  "trainers.footer.residualNeedScan": " · 残留检测需先扫描本机",
+  "trainers.footer.disclaimer": "（下载自来源官网，杀软可能误报，请自行甄别）",
+
+  "trainers.bulk.selected": "已选 {count} 个",
+  "trainers.bulk.download": "批量下载",
+  "trainers.bulk.downloadTip": "批量下载选中且未安装的修改器",
+  "trainers.bulk.delete": "批量删除",
+  "trainers.bulk.deleteTip": "批量删除选中的已安装修改器",
+  "trainers.bulk.clear": "取消选择",
+
+  "trainers.delete.title": "删除 {name} 的修改器？",
+  "trainers.delete.desc": "将删除该修改器的包目录及其全部文件，不影响游戏本体的任何数据。",
+  "trainers.delete.batchTitle": "删除 {count} 个已安装的修改器？",
+  "trainers.delete.batchDesc": "将删除选中修改器的包目录及全部文件，不影响游戏本体的任何数据。",
+  "trainers.delete.confirm": "删除",
+};
+
+export const trainersEn: Record<string, string> = {
+  "trainers.progress.cancelling": "Cancelling…",
+  "trainers.progress.extracting": "Extracting…",
+  "trainers.progress.connecting": "Connecting…",
+
+  "trainers.toast.openFailed": "Failed to open",
+  "trainers.toast.searchFailed": "Search failed",
+  "trainers.toast.installed": "Trainer installed",
+  "trainers.toast.cancelled": "Download cancelled",
+  "trainers.toast.downloadFailed": "Download failed",
+  "trainers.toast.downloadEnded": "Download task finished",
+  "trainers.toast.cancelFailed": "Failed to cancel",
+  "trainers.toast.updated": "Updated to the latest package",
+  "trainers.toast.updateCancelled": "Update cancelled",
+  "trainers.toast.updateFailed": "Update failed",
+  "trainers.toast.launchFailed": "Failed to launch",
+  "trainers.toast.deleted": "Deleted",
+  "trainers.toast.deleteFailed": "Failed to delete",
+  "trainers.toast.coverFillSummary":
+    "Artwork fill: {ok} done, {skipped} already present, {failed} failed",
+  "trainers.toast.coverFilled": "Filled artwork for {count} games",
+  "trainers.toast.coverAllExist": "Every game in this list already has artwork",
+  "trainers.toast.coverFailed": "Artwork fill failed",
+  "trainers.toast.batchDownloadPartial": "Batch download: {ok} succeeded, {failed} failed",
+  "trainers.toast.batchDownloadDone": "Batch download finished ({count} trainers)",
+  "trainers.toast.batchDeletePartial": "Batch delete: {ok} succeeded, {failed} failed",
+  "trainers.toast.batchDeleted": "Deleted {count} trainers",
+
+  "trainers.source.chooseCount": "{count} sources available",
+  "trainers.source.from": "{game} · from {source}",
+
+  "trainers.group.installed": "Installed trainers",
+  "trainers.group.available": "Available trainers",
+  "trainers.group.residual": "Orphaned trainers",
+
+  "trainers.filter.placeholder": "Search trainers (Chinese or English game names)",
+  "trainers.filter.onlyInstalledTip": "Show installed trainers only",
+  "trainers.filter.onlyInstalled": "Installed only ({count})",
+  "trainers.filter.residualTip":
+    "Show installed trainers whose game is not found by the latest local scan",
+  "trainers.filter.checkingTip": "Checking game ↔ trainer matches…",
+  "trainers.filter.needScanTip":
+    "Scan local games on the Saves page first to know whether a trainer still has a game",
+  "trainers.filter.residual": "Orphaned",
+  "trainers.tip.fillCovers": "Fill missing artwork for this list automatically with SteamGridDB",
+  "trainers.tip.fillCoversNeedKey": "Configure a SteamGridDB API Key first in Settings → Extensions",
+  "trainers.action.fillCovers": "Fill artwork",
+  "trainers.action.filling": "Filling…",
+
+  "trainers.notice.title": "These trainers have no matching installed game",
+  "trainers.notice.desc":
+    "The game may be uninstalled or not downloaded yet. Detection is based on the latest game scan. Deleting only removes the trainer package and never touches your saves.",
+
+  "trainers.col.game": "Game / trainer",
+  "trainers.col.source": "Source",
+  "trainers.col.pack": "Package",
+  "trainers.col.updated": "Updated",
+  "trainers.col.status": "Status",
+  "trainers.col.actions": "Actions",
+
+  "trainers.subline.installed": "Installed trainer",
+  "trainers.subline.catalog": "Catalog entry",
+  "trainers.status.residual": "Orphaned",
+  "trainers.status.update": "Update available",
+  "trainers.status.installed": "Installed",
+  "trainers.status.available": "Available",
+  "trainers.status.manual": "Manual download",
+  "trainers.status.downloadable": "Downloadable",
+
+  "trainers.row.options": "{count} options",
+  "trainers.row.optionsUnknown": "Options unknown",
+  "trainers.row.versionUnknown": "Version unknown",
+  "trainers.row.installedAt": "Installed {date}",
+  "trainers.row.notInstalled": "Not installed",
+
+  "trainers.empty.noResidual": "No orphaned trainers detected",
+  "trainers.empty.noInstalled": "No trainers installed yet",
+  "trainers.empty.noMatch": "No matching results",
+  "trainers.empty.noScan": "No installed games recorded yet — scan this PC on the Saves page first",
+  "trainers.empty.noCatalog": "No catalog trainers for your installed games",
+  "trainers.loading.searching": "Searching…",
+  "trainers.loading.matching": "Matching…",
+  "trainers.empty.hint":
+    "Scan this PC on the Saves page first and every trainer available for your games shows up here automatically — or just search",
+
+  "trainers.footer.catalog": "Catalog holds {count} trainers · {installed} installed",
+  "trainers.footer.residual": " · {count} orphaned",
+  "trainers.footer.residualNeedScan": " · scan this PC to detect orphaned trainers",
+  "trainers.footer.disclaimer":
+    "(Downloaded from official source sites; antivirus may flag them, judge for yourself)",
+
+  "trainers.bulk.selected": "{count} selected",
+  "trainers.bulk.download": "Download selected",
+  "trainers.bulk.downloadTip": "Download selected trainers that are not installed yet",
+  "trainers.bulk.delete": "Delete selected",
+  "trainers.bulk.deleteTip": "Delete selected installed trainers",
+  "trainers.bulk.clear": "Clear selection",
+
+  "trainers.delete.title": "Delete the trainer for {name}?",
+  "trainers.delete.desc":
+    "This removes the trainer package folder and all its files. Game data is never touched.",
+  "trainers.delete.batchTitle": "Delete {count} installed trainers?",
+  "trainers.delete.batchDesc":
+    "This removes the package folders of the selected trainers and all their files. Game data is never touched.",
+  "trainers.delete.confirm": "Delete",
+};
