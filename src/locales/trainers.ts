@@ -36,12 +36,12 @@ export const trainersZh: Record<string, string> = {
   "trainers.filter.placeholder": "搜索修改器（游戏名支持中英文）",
   "trainers.filter.onlyInstalledTip": "只显示已安装的修改器",
   "trainers.filter.onlyInstalled": "只看已安装（{count}）",
-  "trainers.filter.residualTip": "显示已安装修改器、但本机扫描不到对应游戏的残留项",
-  "trainers.filter.checkingTip": "正在核对游戏与修改器的对应关系…",
-  "trainers.filter.needScanTip": "先到存档页扫描本机游戏，才能判断修改器是否还有对应游戏",
+  "trainers.filter.residualTip": "显示找不到对应游戏的修改器",
+  "trainers.filter.checkingTip": "正在核对对应关系…",
+  "trainers.filter.needScanTip": "先在存档页扫描本机游戏",
   "trainers.filter.residual": "残留修改器",
-  "trainers.tip.fillCovers": "用 SteamGridDB 自动补全当前列表缺失的图标",
-  "trainers.tip.fillCoversNeedKey": "请先在 设置 → 扩展 中配置 SteamGridDB API Key",
+  "trainers.tip.fillCovers": "补全缺失图标（SteamGridDB）",
+  "trainers.tip.fillCoversNeedKey": "先在 设置 → 扩展 配置 API Key",
   "trainers.action.fillCovers": "补全图标",
   "trainers.action.filling": "补全中…",
 
@@ -88,9 +88,9 @@ export const trainersZh: Record<string, string> = {
 
   "trainers.bulk.selected": "已选 {count} 个",
   "trainers.bulk.download": "批量下载",
-  "trainers.bulk.downloadTip": "批量下载选中且未安装的修改器",
+  "trainers.bulk.downloadTip": "批量下载未安装的修改器",
   "trainers.bulk.delete": "批量删除",
-  "trainers.bulk.deleteTip": "批量删除选中的已安装修改器",
+  "trainers.bulk.deleteTip": "批量删除选中的修改器",
   "trainers.bulk.clear": "取消选择",
 
   "trainers.delete.title": "删除 {name} 的修改器？",
@@ -138,14 +138,12 @@ export const trainersEn: Record<string, string> = {
   "trainers.filter.placeholder": "Search trainers (Chinese or English game names)",
   "trainers.filter.onlyInstalledTip": "Show installed trainers only",
   "trainers.filter.onlyInstalled": "Installed only ({count})",
-  "trainers.filter.residualTip":
-    "Show installed trainers whose game is not found by the latest local scan",
+  "trainers.filter.residualTip": "Installed trainers with no matching game",
   "trainers.filter.checkingTip": "Checking game ↔ trainer matches…",
-  "trainers.filter.needScanTip":
-    "Scan local games on the Saves page first to know whether a trainer still has a game",
+  "trainers.filter.needScanTip": "Scan this PC on the Saves page first",
   "trainers.filter.residual": "Orphaned",
-  "trainers.tip.fillCovers": "Fill missing artwork for this list automatically with SteamGridDB",
-  "trainers.tip.fillCoversNeedKey": "Configure a SteamGridDB API Key first in Settings → Extensions",
+  "trainers.tip.fillCovers": "Fill missing artwork (SteamGridDB)",
+  "trainers.tip.fillCoversNeedKey": "Set an API key in Settings → Extensions",
   "trainers.action.fillCovers": "Fill artwork",
   "trainers.action.filling": "Filling…",
 
@@ -193,9 +191,9 @@ export const trainersEn: Record<string, string> = {
 
   "trainers.bulk.selected": "{count} selected",
   "trainers.bulk.download": "Download selected",
-  "trainers.bulk.downloadTip": "Download selected trainers that are not installed yet",
+  "trainers.bulk.downloadTip": "Download selected uninstalled trainers",
   "trainers.bulk.delete": "Delete selected",
-  "trainers.bulk.deleteTip": "Delete selected installed trainers",
+  "trainers.bulk.deleteTip": "Delete selected trainers",
   "trainers.bulk.clear": "Clear selection",
 
   "trainers.delete.title": "Delete the trainer for {name}?",

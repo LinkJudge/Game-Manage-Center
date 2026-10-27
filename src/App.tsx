@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { Copy, Minus, Square, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { ActionTooltip, TooltipProvider } from "@/components/ui/tooltip";
 import { BackupTab } from "@/backupTab";
 import { TrainersTab } from "@/trainersTab";
 import { SettingsDialog } from "@/settingsDialog";
@@ -98,31 +98,39 @@ function App() {
               </span>
             </span>
             <div className="flex items-center gap-1.5">
-              <button
-                onClick={() => getCurrentWindow().minimize()}
-                title={t("app.win.minimize")}
-                className="gm-window-button gm-window-minimize"
+              <ActionTooltip content={t("app.win.minimize")}>
+                <button
+                  onClick={() => getCurrentWindow().minimize()}
+                  aria-label={t("app.win.minimize")}
+                  className="gm-window-button gm-window-minimize"
+                >
+                  <Minus className="size-3.5" />
+                </button>
+              </ActionTooltip>
+              <ActionTooltip
+                content={isMaximized ? t("app.win.restore") : t("app.win.maximize")}
               >
-                <Minus className="size-3.5" />
-              </button>
-              <button
-                onClick={() => getCurrentWindow().toggleMaximize()}
-                title={isMaximized ? t("app.win.restore") : t("app.win.maximize")}
-                className="gm-window-button gm-window-maximize"
-              >
-                {isMaximized ? (
-                  <Copy className="size-3 -scale-x-100" />
-                ) : (
-                  <Square className="size-3" />
-                )}
-              </button>
-              <button
-                onClick={() => getCurrentWindow().close()}
-                title={t("app.win.close")}
-                className="gm-window-button gm-window-close"
-              >
-                <X className="size-3.5" />
-              </button>
+                <button
+                  onClick={() => getCurrentWindow().toggleMaximize()}
+                  aria-label={isMaximized ? t("app.win.restore") : t("app.win.maximize")}
+                  className="gm-window-button gm-window-maximize"
+                >
+                  {isMaximized ? (
+                    <Copy className="size-3 -scale-x-100" />
+                  ) : (
+                    <Square className="size-3" />
+                  )}
+                </button>
+              </ActionTooltip>
+              <ActionTooltip content={t("app.win.close")}>
+                <button
+                  onClick={() => getCurrentWindow().close()}
+                  aria-label={t("app.win.close")}
+                  className="gm-window-button gm-window-close"
+                >
+                  <X className="size-3.5" />
+                </button>
+              </ActionTooltip>
             </div>
           </div>
           {/* 第二行：顶层模块导航（与 gm-core module 注册表对应）+ 设置 */}
@@ -136,15 +144,12 @@ function App() {
                 <span className="gm-nav-icon"><img src="/icons/trainer.svg" alt="" /></span>
                 {t("nav.trainers")}
               </TabsTrigger>
-              <TabsTrigger
-                value="mods"
-                disabled
-                title={t("app.mod.planned")}
-                className="gm-main-tab"
-              >
-                <span className="gm-nav-icon"><img src="/icons/mod.svg" alt="" /></span>
-                MOD
-              </TabsTrigger>
+              <ActionTooltip content={t("app.mod.planned")} disabled>
+                <TabsTrigger value="mods" disabled className="gm-main-tab">
+                  <span className="gm-nav-icon"><img src="/icons/mod.svg" alt="" /></span>
+                  MOD
+                </TabsTrigger>
+              </ActionTooltip>
             </TabsList>
             <div className="h-6 flex-1" data-tauri-drag-region />
             <Button variant="outline" size="sm" className="gm-settings-button rounded-full" onClick={() => setSettingsOpen(true)}>

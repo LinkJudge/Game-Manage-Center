@@ -500,48 +500,58 @@ export function BackupTab() {
             className="pl-8"
           />
         </div>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => {
-            dismissLeftovers(leftoverDismissIds);
-            clearDeepResult();
-            toast.success(t("saves.toast.leftoverCleared"), {
-              description: t("saves.toast.leftoverClearedDesc", { count: leftoverCount }),
-            });
-          }}
-          disabled={leftoverCount === 0}
-          title={
+        <ActionTooltip
+          content={
             leftoverCount > 0
               ? t("saves.tip.clearLeftover", { count: leftoverCount })
               : t("saves.tip.clearLeftoverNone")
           }
+          disabled={leftoverCount === 0}
         >
-          <Eraser className="mr-1.5 size-3.5" />
-          {t("saves.action.clearLeftover")}{leftoverCount > 0 && ` (${leftoverCount})`}
-        </Button>
-        <Button size="sm" variant="outline" onClick={() => setCustomOpen(true)}>
-          <FolderPlus className="mr-1.5 size-3.5" />
-          {t("saves.action.customGames")}
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={fillMissingCovers}
-          disabled={!sgdbStatus.data || fillingCovers || rows.length === 0}
-          title={
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              dismissLeftovers(leftoverDismissIds);
+              clearDeepResult();
+              toast.success(t("saves.toast.leftoverCleared"), {
+                description: t("saves.toast.leftoverClearedDesc", { count: leftoverCount }),
+              });
+            }}
+            disabled={leftoverCount === 0}
+          >
+            <Eraser className="mr-1.5 size-3.5" />
+            {t("saves.action.clearLeftover")}{leftoverCount > 0 && ` (${leftoverCount})`}
+          </Button>
+        </ActionTooltip>
+        <ActionTooltip content={t("saves.tip.customGames")}>
+          <Button size="sm" variant="outline" onClick={() => setCustomOpen(true)}>
+            <FolderPlus className="mr-1.5 size-3.5" />
+            {t("saves.action.customGames")}
+          </Button>
+        </ActionTooltip>
+        <ActionTooltip
+          content={
             sgdbStatus.data
               ? t("saves.tip.fillCovers")
               : t("saves.tip.fillCoversNeedKey")
           }
+          disabled={!sgdbStatus.data || fillingCovers || rows.length === 0}
         >
-          {fillingCovers ? (
-            <Loader2 className="mr-1.5 size-3.5 animate-spin" />
-          ) : (
-            <ImagePlus className="mr-1.5 size-3.5" />
-          )}
-          {fillingCovers ? t("saves.action.fillingCovers") : t("saves.action.fillCovers")}
-        </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={fillMissingCovers}
+            disabled={!sgdbStatus.data || fillingCovers || rows.length === 0}
+          >
+            {fillingCovers ? (
+              <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+            ) : (
+              <ImagePlus className="mr-1.5 size-3.5" />
+            )}
+            {fillingCovers ? t("saves.action.fillingCovers") : t("saves.action.fillCovers")}
+          </Button>
+        </ActionTooltip>
       </div>
 
       {merged.length === 0 && !scanning && backupOnlyTotal === 0 && (
@@ -852,6 +862,10 @@ export function BackupTab() {
       {selectedRows.length > 0 && (
         <div className="fixed bottom-8 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-full border bg-background/95 px-5 py-2.5 shadow-xl backdrop-blur">
           <span className="text-sm font-medium">{t("saves.bulk.selected", { count: selectedRows.length })}</span>
+          <ActionTooltip
+            content={t("saves.bulk.backupTip")}
+            disabled={batchBackupBulk.isPending || backupableCount === 0}
+          >
           <Button
             size="sm"
             onClick={() =>
@@ -860,7 +874,6 @@ export function BackupTab() {
               )
             }
             disabled={batchBackupBulk.isPending || backupableCount === 0}
-            title={t("saves.bulk.backupTip")}
           >
             {batchBackupBulk.isPending ? (
               <Loader2 className="mr-1.5 size-3.5 animate-spin" />
@@ -869,6 +882,11 @@ export function BackupTab() {
             )}
             {t("saves.bulk.backup")}{backupableCount > 0 ? ` (${backupableCount})` : ""}
           </Button>
+          </ActionTooltip>
+          <ActionTooltip
+            content={t("saves.bulk.restoreTip")}
+            disabled={batchRestoreBulk.isPending || restorableCount === 0}
+          >
           <Button
             size="sm"
             variant="outline"
@@ -878,7 +896,6 @@ export function BackupTab() {
               )
             }
             disabled={batchRestoreBulk.isPending || restorableCount === 0}
-            title={t("saves.bulk.restoreTip")}
           >
             {batchRestoreBulk.isPending ? (
               <Loader2 className="mr-1.5 size-3.5 animate-spin" />
@@ -887,6 +904,7 @@ export function BackupTab() {
             )}
             {t("saves.bulk.restore")}{restorableCount > 0 ? ` (${restorableCount})` : ""}
           </Button>
+          </ActionTooltip>
           <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
             {t("saves.bulk.clear")}
           </Button>
@@ -895,10 +913,13 @@ export function BackupTab() {
 
       {/* 悬空扫描按钮组：右下角横向排布，文字标签一眼可辨 */}
       <div className="fixed bottom-8 right-8 z-50 flex items-center gap-3">
+        <ActionTooltip
+          content={t("saves.scan.deepTip")}
+          disabled={scanning || deepScan.isPending}
+        >
         <button
           onClick={() => deepScan.mutate()}
           disabled={scanning || deepScan.isPending}
-          title={t("saves.scan.deepTip")}
           className="flex h-11 items-center gap-2 rounded-full border bg-background px-4 text-sm font-medium shadow-xl shadow-black/25 transition-transform hover:scale-105 active:scale-95 disabled:opacity-70"
         >
           {deepScan.isPending ? (
@@ -908,10 +929,14 @@ export function BackupTab() {
           )}
           {deepScan.isPending ? t("saves.scan.scanning") : t("saves.scan.deep")}
         </button>
+        </ActionTooltip>
+        <ActionTooltip
+          content={scanning ? t("saves.scan.scanning") : t("saves.scan.localTip")}
+          disabled={scanning}
+        >
         <button
           onClick={() => runScan()}
           disabled={scanning}
-          title={scanning ? t("saves.scan.scanning") : t("saves.scan.localTip")}
           className="flex h-11 items-center gap-2 rounded-full bg-primary px-5 text-sm font-semibold text-primary-foreground shadow-xl shadow-black/25 transition-transform hover:scale-105 active:scale-95 disabled:opacity-70"
         >
           {scanning ? (
@@ -921,6 +946,7 @@ export function BackupTab() {
           )}
           {scanning ? t("saves.scan.scanning") : t("saves.scan.local")}
         </button>
+        </ActionTooltip>
       </div>
     </div>
   );

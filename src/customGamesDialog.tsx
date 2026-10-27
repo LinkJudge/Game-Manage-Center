@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { FolderOpen, FileText, Loader2, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ActionTooltip } from "@/components/ui/tooltip";
 import {
   Dialog,
   DialogContent,
@@ -119,15 +120,17 @@ export function CustomGamesDialog({
                   {t("dialogs.custom.pathCount", { count: g.paths.length })}
                 </div>
               </div>
-              <Button
-                size="icon"
-                variant="outline"
-                className="size-8 text-destructive hover:bg-destructive/10"
-                title={t("dialogs.custom.deleteTip")}
-                onClick={() => removeExisting(g.id)}
-              >
-                <Trash2 className="size-3.5" />
-              </Button>
+              <ActionTooltip content={t("dialogs.custom.deleteTip")}>
+                <Button
+                  size="icon"
+                  variant="outline"
+                  className="size-8 text-destructive hover:bg-destructive/10"
+                  aria-label={t("dialogs.custom.deleteTip")}
+                  onClick={() => removeExisting(g.id)}
+                >
+                  <Trash2 className="size-3.5" />
+                </Button>
+              </ActionTooltip>
             </div>
           ))}
           {customs.data?.length === 0 && (
@@ -166,26 +169,30 @@ export function CustomGamesDialog({
                 className="font-mono text-xs"
               />
               {p.kind !== "reg" && (
-                <Button
-                  size="icon"
-                  variant="outline"
-                  className="size-8 shrink-0"
-                  title={t("dialogs.custom.browse")}
-                  onClick={() => browse(p.kind, i)}
-                >
-                  {p.kind === "folder" ? <FolderOpen className="size-3.5" /> : <FileText className="size-3.5" />}
-                </Button>
+                <ActionTooltip content={t("dialogs.custom.browse")}>
+                  <Button
+                    size="icon"
+                    variant="outline"
+                    className="size-8 shrink-0"
+                    aria-label={t("dialogs.custom.browse")}
+                    onClick={() => browse(p.kind, i)}
+                  >
+                    {p.kind === "folder" ? <FolderOpen className="size-3.5" /> : <FileText className="size-3.5" />}
+                  </Button>
+                </ActionTooltip>
               )}
               {paths.length > 1 && (
-                <Button
-                  size="icon"
-                  variant="outline"
-                  className="size-8 shrink-0"
-                  title={t("dialogs.custom.removeRow")}
-                  onClick={() => setPaths((prev) => prev.filter((_, j) => j !== i))}
-                >
-                  <Trash2 className="size-3.5" />
-                </Button>
+                <ActionTooltip content={t("dialogs.custom.removeRow")}>
+                  <Button
+                    size="icon"
+                    variant="outline"
+                    className="size-8 shrink-0"
+                    aria-label={t("dialogs.custom.removeRow")}
+                    onClick={() => setPaths((prev) => prev.filter((_, j) => j !== i))}
+                  >
+                    <Trash2 className="size-3.5" />
+                  </Button>
+                </ActionTooltip>
               )}
             </div>
           ))}

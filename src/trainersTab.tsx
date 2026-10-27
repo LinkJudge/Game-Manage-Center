@@ -921,54 +921,63 @@ export function TrainersTab() {
             </button>
           )}
         </div>
-        <Button
-          size="sm"
-          variant={onlyInstalled ? "default" : "outline"}
-          onClick={toggleOnlyInstalled}
-          title={tr("trainers.filter.onlyInstalledTip")}
-        >
-          <PackageCheck className="mr-1.5 size-3.5" />
-          {tr("trainers.filter.onlyInstalled", { count: installed.length })}
-        </Button>
-        <Button
-          size="sm"
-          variant={orphanOnly ? "default" : "outline"}
-          onClick={toggleOrphanOnly}
-          disabled={!orphanCheckReady}
-          title={
+        <ActionTooltip content={tr("trainers.filter.onlyInstalledTip")}>
+          <Button
+            size="sm"
+            variant={onlyInstalled ? "default" : "outline"}
+            onClick={toggleOnlyInstalled}
+          >
+            <PackageCheck className="mr-1.5 size-3.5" />
+            {tr("trainers.filter.onlyInstalled", { count: installed.length })}
+          </Button>
+        </ActionTooltip>
+        <ActionTooltip
+          content={
             orphanCheckReady
               ? tr("trainers.filter.residualTip")
               : scanDataReady
                 ? tr("trainers.filter.checkingTip")
                 : tr("trainers.filter.needScanTip")
           }
-          className={
-            orphanOnly
-              ? "border-transparent bg-[#ff9f0a] text-white hover:bg-[#e68f00]"
-              : undefined
-          }
+          disabled={!orphanCheckReady}
         >
-          <PackageX className="mr-1.5 size-3.5" />
-          {tr("trainers.filter.residual")}{orphanCheckReady ? `（${orphanedInstalled.length}）` : ""}
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={fillMissingCovers}
-          disabled={!sgdbStatus.data || fillingCovers || orderedRows.length === 0}
-          title={
+          <Button
+            size="sm"
+            variant={orphanOnly ? "default" : "outline"}
+            onClick={toggleOrphanOnly}
+            disabled={!orphanCheckReady}
+            className={
+              orphanOnly
+                ? "border-transparent bg-[#ff9f0a] text-white hover:bg-[#e68f00]"
+                : undefined
+            }
+          >
+            <PackageX className="mr-1.5 size-3.5" />
+            {tr("trainers.filter.residual")}{orphanCheckReady ? `（${orphanedInstalled.length}）` : ""}
+          </Button>
+        </ActionTooltip>
+        <ActionTooltip
+          content={
             sgdbStatus.data
               ? tr("trainers.tip.fillCovers")
               : tr("trainers.tip.fillCoversNeedKey")
           }
+          disabled={!sgdbStatus.data || fillingCovers || orderedRows.length === 0}
         >
-          {fillingCovers ? (
-            <Loader2 className="mr-1.5 size-3.5 animate-spin" />
-          ) : (
-            <ImagePlus className="mr-1.5 size-3.5" />
-          )}
-          {fillingCovers ? tr("trainers.action.filling") : tr("trainers.action.fillCovers")}
-        </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={fillMissingCovers}
+            disabled={!sgdbStatus.data || fillingCovers || orderedRows.length === 0}
+          >
+            {fillingCovers ? (
+              <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+            ) : (
+              <ImagePlus className="mr-1.5 size-3.5" />
+            )}
+            {fillingCovers ? tr("trainers.action.filling") : tr("trainers.action.fillCovers")}
+          </Button>
+        </ActionTooltip>
       </div>
 
       {orphanOnly && (
@@ -1235,11 +1244,14 @@ export function TrainersTab() {
       {selected.size > 0 && (
         <div className="fixed bottom-8 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-full border bg-background/95 px-5 py-2.5 shadow-xl backdrop-blur">
           <span className="text-sm font-medium">{tr("trainers.bulk.selected", { count: selected.size })}</span>
+          <ActionTooltip
+            content={tr("trainers.bulk.downloadTip")}
+            disabled={batchRunning || downloadableCount === 0}
+          >
           <Button
             size="sm"
             onClick={batchDownload}
             disabled={batchRunning || downloadableCount === 0}
-            title={tr("trainers.bulk.downloadTip")}
           >
             {batchRunning ? (
               <Loader2 className="mr-1.5 size-3.5 animate-spin" />
@@ -1248,17 +1260,22 @@ export function TrainersTab() {
             )}
             {tr("trainers.bulk.download")}{downloadableCount > 0 ? `（${downloadableCount}）` : ""}
           </Button>
+          </ActionTooltip>
+          <ActionTooltip
+            content={tr("trainers.bulk.deleteTip")}
+            disabled={deletableCount === 0}
+          >
           <Button
             size="sm"
             variant="outline"
             className="text-destructive hover:text-destructive"
             onClick={() => setBatchDeleteAsk(true)}
             disabled={deletableCount === 0}
-            title={tr("trainers.bulk.deleteTip")}
           >
             <Trash2 className="mr-1.5 size-3.5" />
             {tr("trainers.bulk.delete")}{deletableCount > 0 ? `（${deletableCount}）` : ""}
           </Button>
+          </ActionTooltip>
           <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
             {tr("trainers.bulk.clear")}
           </Button>

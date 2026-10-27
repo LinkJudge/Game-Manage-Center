@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ActionTooltip } from "@/components/ui/tooltip";
 import {
   Dialog,
   DialogContent,
@@ -158,34 +159,42 @@ export function BackupHistoryDialog({
                       {t("dialogs.history.rolling")}
                     </Badge>
                   )}
-                  <Button
-                    size="icon-sm"
-                    variant="outline"
-                    title={t("dialogs.history.restoreTip")}
-                    disabled={restore.isPending}
-                    onClick={() => startRestore(backup.date)}
+                  <ActionTooltip content={t("dialogs.history.restoreTip")} disabled={restore.isPending}>
+                    <Button
+                      size="icon-sm"
+                      variant="outline"
+                      disabled={restore.isPending}
+                      aria-label={t("dialogs.history.restoreTip")}
+                      onClick={() => startRestore(backup.date)}
+                    >
+                      <RotateCcw className="size-3.5" />
+                    </Button>
+                  </ActionTooltip>
+                  <ActionTooltip
+                    content={backup.isPermanent ? t("dialogs.history.unpin") : t("dialogs.history.pinTip")}
                   >
-                    <RotateCcw className="size-3.5" />
-                  </Button>
-                  <Button
-                    size="icon-sm"
-                    variant="outline"
-                    title={backup.isPermanent ? t("dialogs.history.unpin") : t("dialogs.history.pinTip")}
-                    onClick={() =>
-                      doPin.mutate({ date: backup.date, permanent: !backup.isPermanent })
-                    }
-                  >
-                    {backup.isPermanent ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />}
-                  </Button>
-                  <Button
-                    size="icon-sm"
-                    variant="outline"
-                    className="text-destructive hover:bg-destructive/10"
-                    title={t("dialogs.history.deleteTip")}
-                    onClick={() => setDeleteAsk(backup.date)}
-                  >
-                    <Trash2 className="size-3.5" />
-                  </Button>
+                    <Button
+                      size="icon-sm"
+                      variant="outline"
+                      aria-label={backup.isPermanent ? t("dialogs.history.unpin") : t("dialogs.history.pinTip")}
+                      onClick={() =>
+                        doPin.mutate({ date: backup.date, permanent: !backup.isPermanent })
+                      }
+                    >
+                      {backup.isPermanent ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />}
+                    </Button>
+                  </ActionTooltip>
+                  <ActionTooltip content={t("dialogs.history.deleteTip")}>
+                    <Button
+                      size="icon-sm"
+                      variant="outline"
+                      className="text-destructive hover:bg-destructive/10"
+                      aria-label={t("dialogs.history.deleteTip")}
+                      onClick={() => setDeleteAsk(backup.date)}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </ActionTooltip>
                 </div>
               </div>
             ))}

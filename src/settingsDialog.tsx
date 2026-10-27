@@ -18,6 +18,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ActionTooltip } from "@/components/ui/tooltip";
 import { setLocaleSetting, useI18n } from "@/i18n";
 import {
   Dialog,
@@ -332,12 +333,12 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
             {SETTINGS_TABS.map((item) => {
               const Icon = item.icon;
               const active = tab === item.id;
-              return (
+              const buttonNode = (
                 <button
                   key={item.id}
                   onClick={() => !item.disabled && setTab(item.id)}
                   disabled={item.disabled}
-                  title={item.title ? t(item.title) : undefined}
+                  aria-label={item.title ? t(item.title) : undefined}
                   className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-sm transition-colors ${
                     active
                       ? "bg-muted font-medium text-foreground"
@@ -347,6 +348,13 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                   <Icon className="size-4 shrink-0" />
                   {t(item.label)}
                 </button>
+              );
+              return item.title ? (
+                <ActionTooltip key={item.id} content={t(item.title)} disabled={item.disabled}>
+                  {buttonNode}
+                </ActionTooltip>
+              ) : (
+                buttonNode
               );
             })}
           </nav>
@@ -558,15 +566,20 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                     </div>
                     {/* 主题化步进器：隐藏原生 spinner（深色主题下与 UI 不协调） */}
                     <div className="flex shrink-0 items-center rounded-lg border border-input dark:bg-input/30">
-                      <button
-                        type="button"
-                        onClick={() => setMaxBackups(String(Math.max(1, (Number(maxBackups) || 5) - 1)))}
+                      <ActionTooltip
+                        content={t("settings.saves.decrease")}
                         disabled={(Number(maxBackups) || 1) <= 1}
-                        title={t("settings.saves.decrease")}
-                        className="flex h-8 w-8 items-center justify-center rounded-l-lg text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground disabled:opacity-40"
                       >
-                        −
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => setMaxBackups(String(Math.max(1, (Number(maxBackups) || 5) - 1)))}
+                          disabled={(Number(maxBackups) || 1) <= 1}
+                          aria-label={t("settings.saves.decrease")}
+                          className="flex h-8 w-8 items-center justify-center rounded-l-lg text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground disabled:opacity-40"
+                        >
+                          −
+                        </button>
+                      </ActionTooltip>
                       <Input
                         type="number"
                         min={1}
@@ -578,15 +591,20 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                         }}
                         className="w-12 border-0 bg-transparent text-center [appearance:textfield] focus-visible:ring-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none dark:bg-transparent"
                       />
-                      <button
-                        type="button"
-                        onClick={() => setMaxBackups(String(Math.min(100, (Number(maxBackups) || 5) + 1)))}
+                      <ActionTooltip
+                        content={t("settings.saves.increase")}
                         disabled={(Number(maxBackups) || 0) >= 100}
-                        title={t("settings.saves.increase")}
-                        className="flex h-8 w-8 items-center justify-center rounded-r-lg text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground disabled:opacity-40"
                       >
-                        +
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => setMaxBackups(String(Math.min(100, (Number(maxBackups) || 5) + 1)))}
+                          disabled={(Number(maxBackups) || 0) >= 100}
+                          aria-label={t("settings.saves.increase")}
+                          className="flex h-8 w-8 items-center justify-center rounded-r-lg text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground disabled:opacity-40"
+                        >
+                          +
+                        </button>
+                      </ActionTooltip>
                     </div>
                   </div>
                   <div className="flex items-center justify-between">

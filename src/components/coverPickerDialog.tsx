@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { ImagePlus, Loader2, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ActionTooltip } from "@/components/ui/tooltip";
 import {
   Dialog,
   DialogContent,
@@ -151,17 +152,27 @@ export function CoverPickerDialog({
               <span className="shrink-0">{t("dialogs.cover.candidates", { count: options.candidates.length })}</span>
             </div>
             <div className="gm-cover-grid max-h-[46vh] overflow-y-auto pr-1">
-              {options.candidates.map((candidate) => (
-                <button
-                  key={candidate.id}
-                  type="button"
-                  onClick={() => setSelected(candidate)}
-                  className={`gm-cover-option ${selected?.id === candidate.id ? "is-selected" : ""}`}
-                  title={[candidate.style, candidate.author].filter(Boolean).join(" · ")}
-                >
-                  <img src={candidate.thumb} alt="" loading="lazy" draggable={false} />
-                </button>
-              ))}
+              {options.candidates.map((candidate) => {
+                const meta = [candidate.style, candidate.author].filter(Boolean).join(" · ");
+                const node = (
+                  <button
+                    key={candidate.id}
+                    type="button"
+                    onClick={() => setSelected(candidate)}
+                    aria-label={meta || undefined}
+                    className={`gm-cover-option ${selected?.id === candidate.id ? "is-selected" : ""}`}
+                  >
+                    <img src={candidate.thumb} alt="" loading="lazy" draggable={false} />
+                  </button>
+                );
+                return meta ? (
+                  <ActionTooltip key={candidate.id} content={meta}>
+                    {node}
+                  </ActionTooltip>
+                ) : (
+                  node
+                );
+              })}
             </div>
           </div>
         ) : (

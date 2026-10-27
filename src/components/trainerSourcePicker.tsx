@@ -2,6 +2,7 @@ import { translate, useI18n } from "@/i18n";
 import { Download, ExternalLink, Layers3 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ActionTooltip } from "@/components/ui/tooltip";
 import {
   Dialog,
   DialogContent,
@@ -78,6 +79,13 @@ export function TrainerSourcePicker({
                     {hit.updatedAt && <span>{t("dialogs.source.updatedAt", { date: hit.updatedAt })}</span>}
                   </div>
                 </div>
+                <ActionTooltip
+                  content={
+                    external
+                      ? ACTION_COPY.externalTrainer.full
+                      : ACTION_COPY.downloadTrainer.full
+                  }
+                >
                 <Button
                   size="action"
                   variant={external ? "outline" : "default"}
@@ -93,6 +101,7 @@ export function TrainerSourcePicker({
                     ? ACTION_COPY.externalTrainer.short
                     : ACTION_COPY.downloadTrainer.short}
                 </Button>
+                </ActionTooltip>
               </div>
             );
           })}
