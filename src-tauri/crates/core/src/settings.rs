@@ -106,6 +106,7 @@ mod tests {
             close_to_tray: false,
             trainer_path: Some("D:\\MyTrainers".into()),
             steamgriddb_api_key: Some("sgdb-test".into()),
+            locale: Some("en".into()),
         };
         settings.save(&path).unwrap();
 
@@ -117,6 +118,7 @@ mod tests {
         assert!(!loaded.close_to_tray);
         assert_eq!(loaded.trainer_path.as_deref(), Some("D:\\MyTrainers"));
         assert_eq!(loaded.steamgriddb_api_key.as_deref(), Some("sgdb-test"));
+        assert_eq!(loaded.locale.as_deref(), Some("en"));
         let _ = std::fs::remove_file(&path);
     }
 }
