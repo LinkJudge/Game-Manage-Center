@@ -283,6 +283,10 @@ def main() -> int:
                         help="触发封禁后多少小时内拒绝重跑")
     parser.add_argument("--force", action="store_true", help="忽略冷却标记直接运行")
     parser.add_argument("--no-shuffle", action="store_true", help="保持标题顺序（默认随机打散）")
+    parser.add_argument("--hot", type=Path, default=None,
+                        help="热销榜 JSON（steam_topsellers.py 产出），只抓榜上游戏并按热度排序")
+    parser.add_argument("--hot-top", type=int, default=0,
+                        help="配合 --hot：只处理榜单前 N 名")
     parser.add_argument("--scope", choices=["all", "installed"], default="all")
     parser.add_argument("--record-all", action="store_true", help="连已有中文名的游戏也检查并记录来源")
     parser.add_argument("--dry-run", action="store_true", help="只预览，不写数据库")
@@ -344,12 +348,27 @@ def main() -> int:
             print("[错误] 没有从 Steam 库读到已安装 AppID")
             return 1
         rows = [row for row in rows if steam_appid(row["steam_id"]) in scope_ids]
+    if args.hot:
+        if not args.hot.exists():
+            print(f"[错误] 找不到热销榜文件：{args.hot}")
+            return 1
+        hot_list = json.loads(args.hot.read_text(encoding="utf-8"))
+        rank = {str(item["appid"]): int(item["rank"]) for item in hot_list}
+        before = len(rows)
+        rows = [row for row in rows if steam_appid(row["steam_id"]) in rank]
+        rows.sort(key=lambda row: rank[steam_appid(row["steam_id"])])
+        if args.hot_top > 0:
+            rows = rows[: args.hot_top]
+        print(
+            f"热销榜过滤：榜上 {len(rank)} 个 AppID，命中待处理 {len(rows)} 条"
+            f"（原待处理 {before} 条），按热度从高到低处理"
+        )
     if args.limit > 0:
         rows = rows[: args.limit]
     if not rows:
         print("没有待处理记录。")
         return 0
-    if not args.no_shuffle:
+    if not args.hot and not args.no_shuffle:
         random.shuffle(rows)
 
     print(f"数据库：{args.db}")
@@ -379,6 +398,7 @@ def main() -> int:
 
     updated = 0
     recorded = 0
+    latin = 0
     existing_only = 0
     skipped = 0
     failed = 0
@@ -454,13 +474,22 @@ def main() -> int:
 
         checked_at = datetime.now().isoformat(timespec="seconds")
 
-        if not name or not has_chinese(name):
+        if not name:
             skipped += 1
             if not args.dry_run:
                 source_pending.append(
                     (row["wiki_page_id"], "xiaoheihe", None, "no_name", checked_at)
                 )
             print(f"[{index}/{len(rows)}] {row['title']} ({appid}) -> 无中文名，已记录")
+        elif not has_chinese(name):
+            # 小黑盒有这个游戏，但显示名不含中文（如 CS2、CS:GO）：
+            # 只作为来源记录留存供交叉验证，绝不用它覆盖主名
+            latin += 1
+            if not args.dry_run:
+                source_pending.append(
+                    (row["wiki_page_id"], "xiaoheihe", name, "latin", checked_at)
+                )
+            print(f"[{index}/{len(rows)}] {row['title']} ({appid}) -> 非中文名「{name}」，仅记录")
         else:
             recorded += 1
             existing = str(row["zh_CN"] or "").strip()
@@ -492,7 +521,7 @@ def main() -> int:
     print(
         f"完成：请求 {requests_made} 次，小黑盒中文名记录 {recorded}"
         f"（补入主名 {updated}，已有主名仅记别名 {existing_only}），"
-        f"无中文名 {skipped}，失败 {failed}"
+        f"非中文名 {latin}，无名字 {skipped}，失败 {failed}"
     )
     if args.dry_run:
         print("这是预览结果；去掉 --dry-run 才会写库。")
