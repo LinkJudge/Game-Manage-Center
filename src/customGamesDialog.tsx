@@ -1,3 +1,4 @@
+import { useI18n } from "@/i18n";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
@@ -33,6 +34,8 @@ export function CustomGamesDialog({
   onOpenChange: (v: boolean) => void;
   onSaved: () => void;
 }) {
+  const { t } = useI18n();
+
   const queryClient = useQueryClient();
   const customs = useQuery({
     queryKey: ["custom-games"],
@@ -69,14 +72,14 @@ export function CustomGamesDialog({
     mutationFn: (games: CustomGame[]) => invoke<CustomGame[]>("save_custom_games", { games }),
     onSuccess: (games) => {
       queryClient.invalidateQueries({ queryKey: ["custom-games"] });
-      toast.success("自定义游戏已保存，正在重新扫描…");
+      toast.success(t("dialogs.custom.saved"));
       onSaved();
       // 保存后清空表单
       setName("");
       setPaths([{ kind: "folder", path: "" }]);
       void games;
     },
-    onError: (e) => toast.error("保存失败", { description: String(e) }),
+    onError: (e) => toast.error(t("dialogs.custom.saveFailed"), { description: String(e) }),
   });
 
   const removeExisting = (id: number) => {
@@ -87,7 +90,7 @@ export function CustomGamesDialog({
   const addNew = () => {
     const validPaths = paths.filter((p) => p.path.trim() !== "");
     if (!name.trim() || validPaths.length === 0) {
-      toast.error("请填写游戏名和至少一条路径");
+      toast.error(t("dialogs.custom.invalid"));
       return;
     }
     const current = customs.data ?? [];
@@ -101,11 +104,9 @@ export function CustomGamesDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[640px]">
         <DialogHeader>
-          <DialogTitle>自定义游戏</DialogTitle>
+          <DialogTitle>{t("dialogs.custom.title")}</DialogTitle>
           <DialogDescription>
-            把任意文件夹、文件或注册表项加入备份系统。路径支持占位符（如
-            {" "}
-            <code className="font-mono">{"{{p|appdata}}"}</code>），跨机器可用。
+            {t("dialogs.custom.desc")}
           </DialogDescription>
         </DialogHeader>
 
@@ -115,14 +116,14 @@ export function CustomGamesDialog({
               <div className="min-w-0">
                 <div className="text-sm font-medium">{g.name}</div>
                 <div className="truncate text-xs text-muted-foreground">
-                  {g.paths.length} 条路径
+                  {t("dialogs.custom.pathCount", { count: g.paths.length })}
                 </div>
               </div>
               <Button
                 size="icon"
                 variant="outline"
                 className="size-8 text-destructive hover:bg-destructive/10"
-                title="删除此自定义游戏"
+                title={t("dialogs.custom.deleteTip")}
                 onClick={() => removeExisting(g.id)}
               >
                 <Trash2 className="size-3.5" />
@@ -130,14 +131,14 @@ export function CustomGamesDialog({
             </div>
           ))}
           {customs.data?.length === 0 && (
-            <p className="py-2 text-center text-xs text-muted-foreground">还没有自定义游戏</p>
+            <p className="py-2 text-center text-xs text-muted-foreground">{t("dialogs.custom.empty")}</p>
           )}
         </div>
 
         <div className="space-y-3 rounded-lg border p-3">
           <div className="space-y-1.5">
-            <Label>游戏名称</Label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="例如：我的 Mod 版 Minecraft" />
+            <Label>{t("dialogs.custom.nameLabel")}</Label>
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("dialogs.custom.namePlaceholder")} />
           </div>
           {paths.map((p, i) => (
             <div key={i} className="flex items-center gap-2">
@@ -151,9 +152,9 @@ export function CustomGamesDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="folder">文件夹</SelectItem>
-                  <SelectItem value="file">文件</SelectItem>
-                  <SelectItem value="reg">注册表</SelectItem>
+                  <SelectItem value="folder">{t("dialogs.custom.kind.folder")}</SelectItem>
+                  <SelectItem value="file">{t("dialogs.custom.kind.file")}</SelectItem>
+                  <SelectItem value="reg">{t("dialogs.custom.kind.reg")}</SelectItem>
                 </SelectContent>
               </Select>
               <Input
@@ -169,7 +170,7 @@ export function CustomGamesDialog({
                   size="icon"
                   variant="outline"
                   className="size-8 shrink-0"
-                  title="浏览"
+                  title={t("dialogs.custom.browse")}
                   onClick={() => browse(p.kind, i)}
                 >
                   {p.kind === "folder" ? <FolderOpen className="size-3.5" /> : <FileText className="size-3.5" />}
@@ -180,7 +181,7 @@ export function CustomGamesDialog({
                   size="icon"
                   variant="outline"
                   className="size-8 shrink-0"
-                  title="移除此行"
+                  title={t("dialogs.custom.removeRow")}
                   onClick={() => setPaths((prev) => prev.filter((_, j) => j !== i))}
                 >
                   <Trash2 className="size-3.5" />
@@ -194,17 +195,17 @@ export function CustomGamesDialog({
             onClick={() => setPaths((prev) => [...prev, { kind: "folder", path: "" }])}
           >
             <Plus className="mr-1 size-3.5" />
-            添加一条路径
+            {t("dialogs.custom.addPath")}
           </Button>
         </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            关闭
+            {t("dialogs.custom.close")}
           </Button>
           <Button onClick={addNew} disabled={save.isPending}>
             {save.isPending && <Loader2 className="mr-2 size-4 animate-spin" />}
-            保存并重新扫描
+            {t("dialogs.custom.save")}
           </Button>
         </DialogFooter>
       </DialogContent>

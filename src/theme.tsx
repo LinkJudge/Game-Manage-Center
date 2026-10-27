@@ -6,9 +6,19 @@ export type ThemeMode = "system" | "dark" | "light";
 const STORAGE_KEY = "gm-theme";
 const mql = window.matchMedia("(prefers-color-scheme: dark)");
 
-export function resolvedTheme(mode: ThemeMode): "light" | "dark" {
+function resolvedTheme(mode: ThemeMode): "light" | "dark" {
   if (mode === "system") return mql.matches ? "dark" : "light";
   return mode;
+}
+
+/** 读取持久化的主题偏好；localStorage 不可用（隐私模式/策略限制）时回退 system */
+export function storedThemeMode(): ThemeMode {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    return stored === "dark" || stored === "light" ? stored : "system";
+  } catch {
+    return "system";
+  }
 }
 
 /** 把当前主题应用到 <html> 的 dark 类上；切换时加短暂过渡，避免亮度跳变（Apple §14） */
@@ -20,8 +30,7 @@ export function applyThemeClass(mode: ThemeMode) {
 }
 
 function readStoredMode(): ThemeMode {
-  const stored = localStorage.getItem(STORAGE_KEY);
-  return stored === "dark" || stored === "light" ? stored : "system";
+  return storedThemeMode();
 }
 
 const ThemeContext = createContext<{
@@ -41,7 +50,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, [theme]);
 
   const setTheme = (mode: ThemeMode) => {
-    localStorage.setItem(STORAGE_KEY, mode);
+    try {
+      localStorage.setItem(STORAGE_KEY, mode);
+    } catch {
+      // 存储不可用时本次会话内生效即可
+    }
     setThemeState(mode);
   };
 
