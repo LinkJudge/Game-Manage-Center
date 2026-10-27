@@ -63,42 +63,19 @@ function ActionTooltip({
   disabled?: boolean;
   children: React.ReactElement;
 }) {
-  // Radix Tooltip 默认在「指针悬停」和「键盘聚焦」两种情况下都会打开。
-  // 但对话框打开时会把焦点自动放到第一个可聚焦元素上，正好命中带提示的按钮，
-  // 于是鼠标还没动提示就自己弹出来了（戢翎 2026-10-28 报的问题）。
-  // 这里改为受控：只有指针确实在触发器上时才允许打开，聚焦引起的打开请求直接忽略。
-  const [open, setOpen] = React.useState(false);
-  const pointerInside = React.useRef(false);
-
-  const trigger = disabled ? (
-    <span tabIndex={0} className="inline-flex rounded-[0.7rem] outline-none">
-      {children}
-    </span>
-  ) : (
-    children
-  );
-
+  // 注意：不要在 Tooltip 层做「只认 hover」的受控改造。
+  // 受控会把 Provider 的 delayDuration 绕掉，导致提示一碰就弹（2026-10-28 试过，戢翎要求统一）。
+  // 弹窗自动聚焦导致的误弹，改为在对应 Dialog 上用 onOpenAutoFocus 阻止自动聚焦。
   return (
-    <Tooltip
-      open={open}
-      onOpenChange={(next) => {
-        if (!next) {
-          setOpen(false);
-          return;
-        }
-        if (pointerInside.current) setOpen(true);
-      }}
-    >
-      <TooltipTrigger
-        asChild
-        onPointerEnter={() => {
-          pointerInside.current = true;
-        }}
-        onPointerLeave={() => {
-          pointerInside.current = false;
-        }}
-      >
-        {trigger}
+    <Tooltip>
+      <TooltipTrigger asChild>
+        {disabled ? (
+          <span tabIndex={0} className="inline-flex rounded-[0.7rem] outline-none">
+            {children}
+          </span>
+        ) : (
+          children
+        )}
       </TooltipTrigger>
       <TooltipContent>{content}</TooltipContent>
     </Tooltip>

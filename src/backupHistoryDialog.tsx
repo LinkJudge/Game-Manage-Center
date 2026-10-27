@@ -124,7 +124,10 @@ export function BackupHistoryDialog({
   return (
     <>
       <Dialog open={open && game != null} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-[680px]">
+        <DialogContent
+          className="sm:max-w-[680px]"
+          onOpenAutoFocus={(event) => event.preventDefault()}
+        >
           <DialogHeader>
             <div className="flex items-center gap-3">
               <span className="gm-dialog-icon">
