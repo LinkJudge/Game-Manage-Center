@@ -143,10 +143,11 @@ pub fn build_bundle(
 
     for entry in &kept {
         let src = instance_dir.join(&entry.dir);
-        if entry.store == "file" {
-            if !src.exists() {
-                continue;
-            }
+        // ⚠️ 不能看 entry.store 判断是文件还是目录。
+        // store 表示「备份源的原始形态」：模板 `file*.rpgsave` 会匹配多个文件，
+        // 备份时全装进同一个语义目录（dir 是目录但 store 仍是 "file"）。
+        // 按 store 走 File::open(dir) 在 Windows 上会直接报 拒绝访问 (os error 5)。
+        if src.is_file() {
             let name = format!("{}/{}", entry.dir, file_name_of(&src));
             let mut f = File::open(&src).map_err(|e| e.to_string())?;
             zip.start_file(name, opts_for(&src)).map_err(|e| e.to_string())?;
@@ -231,6 +232,37 @@ mod tests {
         assert_eq!(safe_name("A/B:C*D?E"), "A_B_C_D_E");
         assert_eq!(safe_name("..."), "unnamed");
         assert_eq!(safe_name("  "), "unnamed");
+    }
+
+    /// 回归：store="file" 但 dir 实际是目录（模板带通配符匹配到多个文件）时
+    /// 不能按 store 去 File::open 目录，否则 Windows 报 os error 5。
+    #[test]
+    fn bundles_dir_entry_even_when_store_is_file() {
+        let tmp = std::env::temp_dir().join(format!("gm-bundle-file-store-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let inst = tmp.join("Game").join("2026-10-29_06-00-00");
+        std::fs::create_dir_all(inst.join("存档")).unwrap();
+        std::fs::write(inst.join("存档").join("a.rpgsave"), b"one").unwrap();
+        std::fs::write(inst.join("存档").join("b.rpgsave"), b"two").unwrap();
+        std::fs::write(
+            inst.join("manifest.json"),
+            serde_json::json!({
+                "schema": 1, "title": "Game", "createdAt": "2026-10-29_06-00-00",
+                "entries": [{
+                    "dir": "存档", "template": "{{p|game}}\\save\\file*.rpgsave",
+                    "store": "file", "contentType": "saves"
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let out = tmp.join("b.zip");
+        let info = build_bundle(&inst, "Game", "2026-10-29_06-00-00", &out, true)
+            .expect("store=file 但 dir 是目录时必须正常打包");
+        assert_eq!(info.entries, 1);
+        assert!(info.raw_size >= 6, "两个文件共 6 字节，实际 {}", info.raw_size);
+        std::fs::remove_dir_all(&tmp).ok();
     }
 
     #[test]
