@@ -118,26 +118,26 @@ fn tags(xml: &str, tag: &str) -> Vec<String> {
 }
 
 fn parse_entries(xml: &str, base: &str) -> Vec<RemoteEntry> {
-    let hrefs = tags(xml, "href");
-    let dirs = tags(xml, "collection");
-    let sizes = tags(xml, "getcontentlength");
-    let mods = tags(xml, "getlastmodified");
+    // 关键：必须先按 <response> 分块，再在块内各自取 href/size/collection。
+    // 若分别提取所有同名标签再按下标对齐，一旦某个 response 缺少 getcontentlength，
+    // 后面的 size 就会整体错位（目录拿到了别人的大小、文件拿到 0）。
     let mut out = Vec::new();
-    for (i, href) in hrefs.iter().enumerate() {
-        let path = to_rel_path(href, base);
-        // 第一条通常是根目录自身，跳过
+    for block in tags(xml, "response") {
+        let Some(href) = tags(&block, "href").into_iter().next() else {
+            continue;
+        };
+        let path = to_rel_path(&href, base);
+        // 根目录自身（path 为空）跳过
         if path.is_empty() {
             continue;
         }
-        let is_dir = dirs.get(i).is_some() || href.ends_with('/');
-        let size = sizes.get(i).and_then(|s| s.trim().parse::<u64>().ok()).unwrap_or(0);
-        out.push(RemoteEntry {
-            href: href.clone(),
-            path,
-            is_dir,
-            size,
-            modified: mods.get(i).cloned(),
-        });
+        let is_dir = !tags(&block, "collection").is_empty() || href.ends_with('/');
+        let size = tags(&block, "getcontentlength")
+            .first()
+            .and_then(|s| s.trim().parse::<u64>().ok())
+            .unwrap_or(0);
+        let modified = tags(&block, "getlastmodified").into_iter().next();
+        out.push(RemoteEntry { href, path, is_dir, size, modified });
     }
     out
 }
