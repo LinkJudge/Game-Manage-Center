@@ -1070,6 +1070,55 @@ async fn upload_backups_to_webdav(
         .map_err(|e| format!("任务失败: {e}"))?
 }
 
+
+/// 从云端下载一份备份并还原到本地 Backups 目录
+#[tauri::command]
+async fn download_cloud_backup(
+    state: tauri::State<'_, AppState>,
+    file_name: String,
+) -> Result<gm_core::cloud::ExtractInfo, String> {
+    // 只取文件名部分，防止 ../ 穿越
+    let safe_file = std::path::Path::new(&file_name)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .filter(|n| n.ends_with(".zip"))
+        .ok_or_else(|| "非法的文件名".to_string())?;
+
+    let (cfg, root) = {
+        let s = state.settings.lock().unwrap();
+        if !s.webdav_enabled {
+            return Err("未启用云存档".into());
+        }
+        let url = s
+            .webdav_url
+            .clone()
+            .filter(|u| !u.trim().is_empty())
+            .ok_or_else(|| "未配置 WebDAV 地址".to_string())?;
+        (
+            webdav::Config {
+                url,
+                username: s.webdav_username.clone(),
+                password: s.webdav_password.clone(),
+            },
+            state.backups_root(),
+        )
+    };
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let remote = format!("{CLOUD_DIR}/{safe_file}");
+        let bytes = webdav::download(&cfg, &remote)?;
+        let tmp_dir = std::env::temp_dir().join("gm-cloud-download");
+        std::fs::create_dir_all(&tmp_dir).map_err(|e| format!("创建临时目录失败: {e}"))?;
+        let tmp_zip = tmp_dir.join(&safe_file);
+        std::fs::write(&tmp_zip, &bytes).map_err(|e| format!("写入临时文件失败: {e}"))?;
+        let info = gm_core::cloud::extract_bundle(&tmp_zip, &root);
+        std::fs::remove_file(&tmp_zip).ok();
+        info
+    })
+    .await
+    .map_err(|e| format!("任务失败: {e}"))?
+}
+
 /// 列出云端已有备份（文件名、大小、修改时间）
 #[tauri::command]
 async fn list_cloud_backups(
@@ -1964,6 +2013,7 @@ pub fn run() {
             test_webdav,
             upload_backups_to_webdav,
             list_cloud_backups,
+            download_cloud_backup,
             scan_installed_games,
             save_database_info,
             update_save_database,

@@ -7,6 +7,7 @@ import {
   Blocks,
   Cloud,
   DatabaseZap,
+  Download,
   ExternalLink,
   FolderOpen,
   Gamepad2,
@@ -150,6 +151,12 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const [testingDav, setTestingDav] = useState(false);
   const [davResult, setDavResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [uploadingDav, setUploadingDav] = useState(false);
+  const [cloudOpen, setCloudOpen] = useState(false);
+  const [cloudList, setCloudList] = useState<
+    { path: string; size: number; modified: string | null; isDir: boolean }[]
+  >([]);
+  const [loadingCloud, setLoadingCloud] = useState(false);
+  const [downloadingName, setDownloadingName] = useState<string | null>(null);
 
   // 只在每次打开时用后端值初始化一次。设置项改为即时保存后，保存会 invalidate
   // settings 查询，若每次都回灌 state，正在输入的内容会被打断、光标会跳。
@@ -226,6 +233,32 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       })
       .catch((e) => setDavResult({ ok: false, text: String(e) }))
       .finally(() => setUploadingDav(false));
+  };
+
+  // 打开云端备份列表
+  const openCloudList = () => {
+    setCloudOpen(true);
+    setLoadingCloud(true);
+    setCloudList([]);
+    invoke<{ path: string; size: number; modified: string | null; isDir: boolean }[]>(
+      "list_cloud_backups",
+    )
+      .then((list) => setCloudList(list.filter((e) => !e.isDir && e.path.endsWith(".zip"))))
+      .catch((e) => toast.error(String(e)))
+      .finally(() => setLoadingCloud(false));
+  };
+
+  // 下载单份云端备份并还原
+  const downloadOne = (path: string) => {
+    const name = path.split("/").pop() ?? path;
+    setDownloadingName(name);
+    invoke<{ title: string }>("download_cloud_backup", { fileName: name })
+      .then((info) => {
+        toast.success(t("settings.extensions.webdav.downloadDone", { title: info.title }));
+        queryClient.invalidateQueries({ queryKey: ["all-backups"] });
+      })
+      .catch((e) => toast.error(String(e)))
+      .finally(() => setDownloadingName(null));
   };
 
   const [migrateAsk, setMigrateAsk] = useState<string | null>(null);
@@ -650,6 +683,16 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                           ? t("settings.extensions.webdav.uploading")
                           : t("settings.extensions.webdav.upload")}
                       </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={openCloudList}
+                        disabled={!webdavEnabled}
+                        className="shrink-0"
+                      >
+                        <Cloud className="mr-1.5 size-3.5" />
+                        {t("settings.extensions.webdav.browse")}
+                      </Button>
                       {davResult && (
                         <span
                           className={`text-xs ${davResult.ok ? "text-emerald-500" : "text-destructive"}`}
@@ -982,6 +1025,58 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
 
         {/* 设置项即时生效，无需底部保存/取消 */}
       </DialogContent>
+
+      {/* 云端备份列表 */}
+      <Dialog open={cloudOpen} onOpenChange={setCloudOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>{t("settings.extensions.webdav.browseTitle")}</DialogTitle>
+            <DialogDescription>
+              {loadingCloud
+                ? t("settings.extensions.webdav.browseLoading")
+                : t("settings.extensions.webdav.browseDesc", { count: cloudList.length })}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[420px] divide-y overflow-y-auto">
+            {!loadingCloud && cloudList.length === 0 && (
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                {t("settings.extensions.webdav.browseEmpty")}
+              </p>
+            )}
+            {cloudList.map((entry) => {
+              const name = entry.path.split("/").pop() ?? entry.path;
+              const busy = downloadingName === name;
+              return (
+                <div key={entry.path} className="flex items-center justify-between gap-3 py-2.5">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm">{name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {(entry.size / 1024).toFixed(1)} KB
+                      {entry.modified ? ` · ${entry.modified}` : ""}
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => downloadOne(entry.path)}
+                    disabled={busy}
+                    className="shrink-0"
+                  >
+                    {busy ? (
+                      <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+                    ) : (
+                      <Download className="mr-1.5 size-3.5" />
+                    )}
+                    {busy
+                      ? t("settings.extensions.webdav.downloading")
+                      : t("settings.extensions.webdav.download")}
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* 备份位置变更 → 询问是否迁移现有备份 */}
       <AlertDialog open={migrateAsk != null} onOpenChange={(open) => !open && setMigrateAsk(null)}>
