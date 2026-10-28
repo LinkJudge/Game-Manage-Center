@@ -179,6 +179,29 @@ pub struct TrainerUpdateInfo {
 /// 名称归一化：保留 ASCII 字母数字与 CJK 表意文字，其余（空白、标点、全角、
 /// 符号）全部丢弃并转小写；ASCII 数字段转为罗马数字小写（"3"→"iii"），
 /// 使 "DOOM 3" 与 "DOOM III"、"gta5" 与 "GTA V" 等价。检索与匹配共用。
+/// 同一游戏若官网（fling）有条目，就隐藏旧档（fling_archive）那条。
+///
+/// 依据：官网对同一游戏提供更新、更全的版本（Anno 1800 官网 13 包），
+/// 但**旧档那 56 个包官网全都没有**（官网删掉了早期版本），所以旧档数据
+/// 必须完整保留在 catalog 里——只是默认不跟官网那条并列显示。
+///
+/// 只作用于同属 FLiNG 的两个来源；小幸是独立作者，同名游戏照常并列展示。
+pub fn dedupe_fling_family(hits: Vec<TrainerHit>) -> Vec<TrainerHit> {
+    let official: std::collections::HashSet<String> = hits
+        .iter()
+        .filter(|h| h.source_id == "fling")
+        .map(|h| normalize_name(&h.game_name))
+        .collect();
+    if official.is_empty() {
+        return hits;
+    }
+    hits.into_iter()
+        .filter(|h| {
+            !(h.source_id == "fling_archive" && official.contains(&normalize_name(&h.game_name)))
+        })
+        .collect()
+}
+
 pub fn normalize_name(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut digits = String::new();
@@ -431,8 +454,9 @@ impl TrainerRegistry {
             }
         }
         scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-        scored.truncate(limit);
-        scored.into_iter().map(|(_, h)| h).collect()
+        // 先去重再截断：去重会砍掉旧档的重复项，若先截断则结果会不足 limit 条
+        let hits: Vec<TrainerHit> = scored.into_iter().map(|(_, h)| h).collect();
+        dedupe_fling_family(hits).into_iter().take(limit).collect()
     }
 
     /// 已安装游戏 ↔ 修改器匹配。语义（见 SPEC.md）：归一化后**全等**才命中
@@ -477,7 +501,7 @@ impl TrainerRegistry {
                 GameTrainerMatch {
                     title: title.clone(),
                     zh_name: game_zh.clone(),
-                    matches,
+                    matches: dedupe_fling_family(matches),
                 }
             })
             .collect()
@@ -547,6 +571,57 @@ mod tests {
         assert_eq!(normalize_name("艾尔登法环"), "艾尔登法环");
         assert_eq!(normalize_name("Assassin's Creed® Valhalla"), "assassinscreedvalhalla");
         assert_eq!(normalize_name("黑神话：悟空"), "黑神话悟空");
+    }
+
+    /// 造一个最小 TrainerHit 用于去重测试
+    fn hit(source: &str, name: &str) -> TrainerHit {
+        TrainerHit {
+            source_id: source.into(),
+            id: format!("{source}/x"),
+            game_name: name.into(),
+            zh_name: None,
+            page_url: String::new(),
+            updated_at: None,
+            options_count: None,
+            game_version: None,
+            download_url: None,
+            external_url: None,
+            size_bytes: None,
+            download_count: None,
+            total_downloads: 0,
+        }
+    }
+
+    /// 历史版本不能丢：官网有条目时隐藏旧档同游戏那条，
+    /// 但旧档独有的游戏、以及小幸（独立作者）的同名条目都要保留。
+    #[test]
+    fn dedupe_hides_archive_only_when_official_has_same_game() {
+        let hits = vec![
+            hit("fling", "Anno 1800"),
+            hit("fling_archive", "Anno 1800"),
+            hit("fling_archive", "Alan Wake"),
+            hit("xiaoxing", "Anno 1800"),
+        ];
+        let out = dedupe_fling_family(hits);
+        assert_eq!(out.len(), 3, "应只砍掉旧档那条重复：{out:?}");
+        assert!(out.iter().any(|h| h.source_id == "fling"));
+        assert!(!out
+            .iter()
+            .any(|h| h.source_id == "fling_archive" && h.game_name == "Anno 1800"));
+        assert!(out
+            .iter()
+            .any(|h| h.source_id == "fling_archive" && h.game_name == "Alan Wake"));
+        assert!(out.iter().any(|h| h.source_id == "xiaoxing"), "小幸是独立作者，不能去重");
+    }
+
+    /// 归一化后同名（大小写/标点差异）也要认作同一游戏
+    #[test]
+    fn dedupe_treats_normalized_names_as_same_game() {
+        let hits = vec![
+            hit("fling", "ARK: Survival Evolved"),
+            hit("fling_archive", "ARK Survival Evolved"),
+        ];
+        assert_eq!(dedupe_fling_family(hits).len(), 1);
     }
 
     #[test]

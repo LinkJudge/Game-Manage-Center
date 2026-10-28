@@ -22,9 +22,6 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-# 归一化规则与 dedupe_archive.py / 引擎 normalize_name 保持一致
-from dedupe_archive import normalize as _norm
-
 ROOT = Path(__file__).resolve().parents[2]
 OUT_DIR = ROOT / "src-tauri" / "resources" / "trainers"
 CACHE_DIR = Path(__file__).resolve().parent / ".cache"
@@ -259,31 +256,10 @@ def write(name: str, data: dict) -> None:
     print(f"{name}: {len(data['trainers'])} 条 -> {path}")
 
 
-def dedupe_against_fling(data: dict) -> dict:
-    """剔除与官网主目录（fling.json）重复的条目。
-
-    官网对同一游戏提供更全的版本（Anno 1800 官网 13 包、旧档仅 1 包）且更新时间更新，
-    因此以官网为准。保留旧档独有的部分——那是官网已下架老修改器的唯一来源。
-    """
-    main_json = OUT_DIR / "fling.json"
-    if not main_json.exists():
-        print("  [提示] 找不到 fling.json，跳过去重")
-        return data
-    main_data = json.loads(main_json.read_text(encoding="utf-8"))
-    taken = {_norm(t.get("gameName", "")) for t in main_data.get("trainers", [])}
-    kept = [t for t in data["trainers"] if _norm(t.get("gameName", "")) not in taken]
-    dropped = len(data["trainers"]) - len(kept)
-    if dropped:
-        print(f"  去重：剔除 {dropped} 条与官网重复的条目（官网版本更全）")
-    data["trainers"] = kept
-    data["stats"] = {**data.get("stats", {}), "count": len(kept)}
-    return data
-
-
 def main() -> int:
     only = sys.argv[1] if len(sys.argv) > 1 else "all"
     if only in ("all", "archive"):
-        write("fling_archive.json", dedupe_against_fling(archive_catalog()))
+        write("fling_archive.json", archive_catalog())
     if only in ("all", "xiaoxing"):
         write("xiaoxing.json", xiaoxing_catalog())
     return 0
