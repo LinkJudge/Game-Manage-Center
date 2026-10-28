@@ -98,7 +98,8 @@ def as_int(v):
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="迁移游戏库到自建 schema")
-    parser.add_argument("--db", type=Path, default=SRC_DB)
+    parser.add_argument("--db", type=Path, default=SRC_DB, help="输入库（旧结构或新结构均可）")
+    parser.add_argument("--out", type=Path, default=None, help="输出库路径（默认 <db>.new.db）")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -150,7 +151,7 @@ def main() -> int:
     shutil.copy2(args.db, backup)
     print(f"已备份旧库：{backup}")
 
-    new_path = args.db.with_suffix(".new.db")
+    new_path = args.out if args.out else args.db.with_suffix(".new.db")
     if new_path.exists():
         new_path.unlink()
     dst = sqlite3.connect(new_path)
