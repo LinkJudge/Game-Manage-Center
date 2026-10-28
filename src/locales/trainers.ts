@@ -98,6 +98,8 @@ export const trainersZh: Record<string, string> = {
   "trainers.delete.batchTitle": "删除 {count} 个已安装的修改器？",
   "trainers.delete.batchDesc": "将删除选中修改器的包目录及全部文件，不影响游戏本体的任何数据。",
   "trainers.delete.confirm": "删除",
+  "trainers.filter.sourceAll": "全部来源",
+  "trainers.filter.sourceTip": "按修改器来源筛选（再点一次取消）",
 };
 
 export const trainersEn: Record<string, string> = {
@@ -203,4 +205,6 @@ export const trainersEn: Record<string, string> = {
   "trainers.delete.batchDesc":
     "This removes the package folders of the selected trainers and all their files. Game data is never touched.",
   "trainers.delete.confirm": "Delete",
+  "trainers.filter.sourceAll": "All sources",
+  "trainers.filter.sourceTip": "Filter by trainer source (click again to clear)",
 };

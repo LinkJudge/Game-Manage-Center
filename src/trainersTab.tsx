@@ -341,6 +341,8 @@ export function TrainersTab() {
   const [batchDeleteAsk, setBatchDeleteAsk] = useState(false);
   const [onlyInstalled, setOnlyInstalled] = useState(false);
   const [orphanOnly, setOrphanOnly] = useState(false);
+  // 来源筛选："all" 或某个 sourceId
+  const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [coverPickerRow, setCoverPickerRow] = useState<ResultRow | null>(null);
   const [sourcePickerRow, setSourcePickerRow] = useState<ResultRow | null>(null);
   const [fillingCovers, setFillingCovers] = useState(false);
@@ -755,9 +757,22 @@ export function TrainersTab() {
     available: 1,
     residual: 2,
   };
-  const orderedRows = [...rows].sort(
+  const sortedRows = [...rows].sort(
     (a, b) => groupOrder[groupOfRow(a)] - groupOrder[groupOfRow(b)],
   );
+  // 来源筛选：只看带 hit 的行；纯已安装行（无来源信息）始终保留，
+  // 否则筛选「小幸」时本地的风灵修改器会整个消失，看起来像丢了。
+  const orderedRows =
+    sourceFilter === "all"
+      ? sortedRows
+      : sortedRows.filter((row) => {
+          const ids = [
+            row.hit?.sourceId,
+            ...(row.sources?.map((s) => s.sourceId) ?? []),
+          ].filter((x): x is string => Boolean(x));
+          if (ids.length === 0) return true;
+          return ids.includes(sourceFilter);
+        });
   const groupCounts: Record<TrainerGroup, number> = { installed: 0, available: 0, residual: 0 };
   for (const row of orderedRows) groupCounts[groupOfRow(row)]++;
   const groupMeta: Record<TrainerGroup, { label: string; dot: string }> = {
@@ -921,6 +936,49 @@ export function TrainersTab() {
             </button>
           )}
         </div>
+        {sources.length > 1 && (
+          <ActionTooltip content={tr("trainers.filter.sourceTip")}>
+            <div className="flex items-center gap-0.5 rounded-[0.7rem] border p-0.5">
+              <button
+                type="button"
+                onClick={() => setSourceFilter("all")}
+                className={`rounded-[0.55rem] px-2 py-1 text-xs transition-colors ${
+                  sourceFilter === "all"
+                    ? "bg-foreground/10 font-medium text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {tr("trainers.filter.sourceAll")}
+              </button>
+              {sources.map((src) => {
+                const short =
+                  src.id === "fling"
+                    ? "风灵"
+                    : src.id === "fling_archive"
+                      ? "旧档"
+                      : src.id === "xiaoxing"
+                        ? "小幸"
+                        : src.title.slice(0, 2);
+                const active = sourceFilter === src.id;
+                return (
+                  <button
+                    key={src.id}
+                    type="button"
+                    title={`${src.title}（${src.count}）`}
+                    onClick={() => setSourceFilter(active ? "all" : src.id)}
+                    className={`rounded-[0.55rem] px-2 py-1 text-xs transition-colors ${
+                      active
+                        ? "bg-foreground/10 font-medium text-foreground"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {short}
+                  </button>
+                );
+              })}
+            </div>
+          </ActionTooltip>
+        )}
         <ActionTooltip content={tr("trainers.filter.onlyInstalledTip")}>
           <Button
             size="sm"
