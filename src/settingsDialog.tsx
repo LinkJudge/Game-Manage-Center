@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
@@ -141,31 +141,28 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const [autoBackupEnabled, setAutoBackupEnabled] = useState(false);
   const [closeToTray, setCloseToTray] = useState(true);
 
+  // 只在每次打开时用后端值初始化一次。设置项改为即时保存后，保存会 invalidate
+  // settings 查询，若每次都回灌 state，正在输入的内容会被打断、光标会跳。
+  const hydratedRef = useRef(false);
   useEffect(() => {
-    if (settings.data) {
-      setBackupPath(settings.data.backupPath ?? "");
-      setTrainerPath(settings.data.trainerPath ?? "");
-      setSteamgriddbApiKey(settings.data.steamgriddbApiKey ?? "");
-      setMaxBackups(String(settings.data.maxBackups));
-      setCompress(settings.data.compressBackups);
-      setAutoBackupEnabled(settings.data.autoBackupEnabled);
-      setCloseToTray(settings.data.closeToTray);
-      // 后端有明确语言设置时以其为准；为空表示跟随系统，保留本地状态
-      if (settings.data.locale === "zh" || settings.data.locale === "en") {
-        setLocaleSetting(settings.data.locale);
-      }
+    if (!open) {
+      hydratedRef.current = false;
+      return;
     }
-  }, [settings.data]);
-
-  const browse = async () => {
-    const picked = await invoke<string | null>("pick_folder");
-    if (picked) setBackupPath(picked);
-  };
-
-  const browseTrainer = async () => {
-    const picked = await invoke<string | null>("pick_folder");
-    if (picked) setTrainerPath(picked);
-  };
+    if (hydratedRef.current || !settings.data) return;
+    hydratedRef.current = true;
+    setBackupPath(settings.data.backupPath ?? "");
+    setTrainerPath(settings.data.trainerPath ?? "");
+    setSteamgriddbApiKey(settings.data.steamgriddbApiKey ?? "");
+    setMaxBackups(String(settings.data.maxBackups));
+    setCompress(settings.data.compressBackups);
+    setAutoBackupEnabled(settings.data.autoBackupEnabled);
+    setCloseToTray(settings.data.closeToTray);
+    // 后端有明确语言设置时以其为准；为空表示跟随系统，保留本地状态
+    if (settings.data.locale === "zh" || settings.data.locale === "en") {
+      setLocaleSetting(settings.data.locale);
+    }
+  }, [open, settings.data, setLocaleSetting]);
 
   const [migrateAsk, setMigrateAsk] = useState<string | null>(null);
   const [updatingCatalog, setUpdatingCatalog] = useState(false);
@@ -186,24 +183,15 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   };
   const [addingDefender, setAddingDefender] = useState(false);
 
+  // 即时生效：只提交变更字段。后端 save_settings 的参数都是 Option，有值才改，
+  // 因此这里传什么就改什么，不会覆盖未传的项。
   const save = useMutation({
-    mutationFn: () =>
-      invoke<AppSettings>("save_settings", {
-        backupPath: backupPath || null,
-        maxBackups: Number(maxBackups) || 5,
-        compressBackups: compress,
-        autoBackupEnabled: autoBackupEnabled,
-        closeToTray: closeToTray,
-        trainerPath: trainerPath || null,
-        steamgriddbApiKey: steamgriddbApiKey.trim(),
-        locale: localeSetting,
-      }),
+    mutationFn: (patch: Record<string, unknown>) =>
+      invoke<AppSettings>("save_settings", patch),
     onSuccess: (saved) => {
       queryClient.invalidateQueries({ queryKey: ["settings"] });
       queryClient.invalidateQueries({ queryKey: ["sgdb-status"] });
-      toast.success(t("settings.toast.saved"));
-      onOpenChange(false);
-      // 备份位置变了 → 询问是否把现有备份搬过去
+      // 备份位置变了 → 询问是否把现有备份搬过去（只在真正换目录时问一次）
       const previous = settings.data?.backupPath ?? "";
       const next = saved.backupPath ?? "";
       if (next && previous && previous !== next) {
@@ -212,6 +200,23 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     },
     onError: (e) => toast.error(t("settings.toast.saveFailed"), { description: String(e) }),
   });
+
+  const browse = async () => {
+    const picked = await invoke<string | null>("pick_folder");
+    if (picked) {
+      setBackupPath(picked);
+      save.mutate({ backupPath: picked });
+    }
+  };
+
+  const browseTrainer = async () => {
+    const picked = await invoke<string | null>("pick_folder");
+    if (picked) {
+      setTrainerPath(picked);
+      save.mutate({ trainerPath: picked });
+    }
+  };
+
 
   const migrate = useMutation({
     mutationFn: (target: string) => invoke<number>("migrate_backups", { newPath: target }),
@@ -371,7 +376,10 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                     control={
                       <Select
                         value={localeSetting}
-                        onValueChange={(v) => setLocaleSetting(v as "system" | "zh" | "en")}
+                        onValueChange={(v) => {
+                          setLocaleSetting(v as "system" | "zh" | "en");
+                          save.mutate({ locale: v === "system" ? "" : v });
+                        }}
                       >
                         <SelectTrigger className="w-[120px] shrink-0">
                           <SelectValue />
@@ -404,7 +412,10 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                     label={t("settings.autoBackup.label")}
                     description={t("settings.autoBackup.desc")}
                     control={
-                      <Switch checked={autoBackupEnabled} onCheckedChange={(v) => setAutoBackupEnabled(v)} />
+                      <Switch checked={autoBackupEnabled} onCheckedChange={(v) => {
+                          setAutoBackupEnabled(v);
+                          save.mutate({ autoBackupEnabled: v });
+                        }} />
                     }
                   />
                   <Row
@@ -436,7 +447,11 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                     label={t("settings.closeTray.label")}
                     description={t("settings.closeTray.desc")}
                     control={
-                      <Select value={closeToTray ? "tray" : "exit"} onValueChange={(v) => setCloseToTray(v === "tray")}>
+                      <Select value={closeToTray ? "tray" : "exit"} onValueChange={(v) => {
+                          const toTray = v === "tray";
+                          setCloseToTray(toTray);
+                          save.mutate({ closeToTray: toTray });
+                        }}>
                         <SelectTrigger className="w-[120px] shrink-0">
                           <SelectValue />
                         </SelectTrigger>
@@ -498,6 +513,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                         type="password"
                         value={steamgriddbApiKey}
                         onChange={(e) => setSteamgriddbApiKey(e.target.value)}
+                        onBlur={() => save.mutate({ steamgriddbApiKey: steamgriddbApiKey.trim() })}
                         placeholder={t("settings.extensions.sgdbKey.placeholder")}
                         className="font-mono text-xs"
                         autoComplete="off"
@@ -552,7 +568,8 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                     <Label>{t("settings.saves.pathLabel")}</Label>
                     <p className="text-xs text-muted-foreground">{t("settings.saves.pathHint")}</p>
                     <div className="flex gap-2">
-                      <Input value={backupPath} onChange={(e) => setBackupPath(e.target.value)} className="text-xs" placeholder="默认位置" />
+                      <Input value={backupPath} onChange={(e) => setBackupPath(e.target.value)}
+                        onBlur={() => save.mutate({ backupPath: backupPath.trim() })} className="text-xs" placeholder="默认位置" />
                       <Button variant="outline" size="sm" onClick={browse} className="shrink-0">
                         <FolderOpen className="mr-1 size-4" />
                         {t("settings.saves.browse")}
@@ -572,7 +589,11 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                       >
                         <button
                           type="button"
-                          onClick={() => setMaxBackups(String(Math.max(1, (Number(maxBackups) || 5) - 1)))}
+                          onClick={() => {
+                            const next = Math.max(1, (Number(maxBackups) || 5) - 1);
+                            setMaxBackups(String(next));
+                            save.mutate({ maxBackups: next });
+                          }}
                           disabled={(Number(maxBackups) || 1) <= 1}
                           aria-label={t("settings.saves.decrease")}
                           className="flex h-8 w-8 items-center justify-center rounded-l-lg text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground disabled:opacity-40"
@@ -589,6 +610,12 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                           const v = e.target.value.replace(/[^\d]/g, "");
                           setMaxBackups(v === "" ? "" : String(Math.min(100, Math.max(1, Number(v)))));
                         }}
+                        onBlur={(e) => {
+                          const v = e.target.value.replace(/[^\d]/g, "");
+                          const num = v === "" ? 5 : Math.min(100, Math.max(1, Number(v)));
+                          setMaxBackups(String(num));
+                          save.mutate({ maxBackups: num });
+                        }}
                         className="w-12 border-0 bg-transparent text-center [appearance:textfield] focus-visible:ring-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none dark:bg-transparent"
                       />
                       <ActionTooltip
@@ -597,7 +624,11 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                       >
                         <button
                           type="button"
-                          onClick={() => setMaxBackups(String(Math.min(100, (Number(maxBackups) || 5) + 1)))}
+                          onClick={() => {
+                            const next = Math.min(100, (Number(maxBackups) || 5) + 1);
+                            setMaxBackups(String(next));
+                            save.mutate({ maxBackups: next });
+                          }}
                           disabled={(Number(maxBackups) || 0) >= 100}
                           aria-label={t("settings.saves.increase")}
                           className="flex h-8 w-8 items-center justify-center rounded-r-lg text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground disabled:opacity-40"
@@ -612,7 +643,13 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                       <Label>{t("settings.saves.zipLabel")}</Label>
                       <p className="text-xs text-muted-foreground">{t("settings.saves.zipHint")}</p>
                     </div>
-                    <Switch checked={compress} onCheckedChange={setCompress} />
+                    <Switch
+                      checked={compress}
+                      onCheckedChange={(v) => {
+                        setCompress(v);
+                        save.mutate({ compressBackups: v });
+                      }}
+                    />
                   </div>
                   <div className="flex items-center justify-between gap-3 border-t pt-3">
                     <div className="min-w-0">
@@ -652,7 +689,8 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                       {t("settings.trainers.pathHint")}
                     </p>
                     <div className="flex gap-2">
-                      <Input value={trainerPath} onChange={(e) => setTrainerPath(e.target.value)} className="text-xs" placeholder="默认位置" />
+                      <Input value={trainerPath} onChange={(e) => setTrainerPath(e.target.value)}
+                        onBlur={() => save.mutate({ trainerPath: trainerPath.trim() })} className="text-xs" placeholder="默认位置" />
                       <Button variant="outline" size="sm" onClick={browseTrainer} className="shrink-0">
                         <FolderOpen className="mr-1 size-4" />
                         {t("settings.saves.browse")}
@@ -777,16 +815,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
           </div>
         </div>
 
-        {/* 底部操作条 */}
-        <div className="flex items-center justify-end gap-2 border-t bg-muted/30 px-5 py-3">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            {t("common.cancel")}
-          </Button>
-          <Button onClick={() => save.mutate()} disabled={save.isPending}>
-            {save.isPending && <Loader2 className="mr-2 size-4 animate-spin" />}
-            {t("common.save")}
-          </Button>
-        </div>
+        {/* 设置项即时生效，无需底部保存/取消 */}
       </DialogContent>
 
       {/* 备份位置变更 → 询问是否迁移现有备份 */}
