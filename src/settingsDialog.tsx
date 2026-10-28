@@ -17,6 +17,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Trash2,
+  UploadCloud,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ActionTooltip } from "@/components/ui/tooltip";
@@ -148,6 +149,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const [webdavEnabled, setWebdavEnabled] = useState(false);
   const [testingDav, setTestingDav] = useState(false);
   const [davResult, setDavResult] = useState<{ ok: boolean; text: string } | null>(null);
+  const [uploadingDav, setUploadingDav] = useState(false);
 
   // 只在每次打开时用后端值初始化一次。设置项改为即时保存后，保存会 invalidate
   // settings 查询，若每次都回灌 state，正在输入的内容会被打断、光标会跳。
@@ -200,6 +202,30 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         setDavResult({ ok: false, text: `${t("settings.extensions.webdav.fail")}：${String(e)}` }),
       )
       .finally(() => setTestingDav(false));
+  };
+
+  // 上传全部备份到云端
+  const uploadAllDav = () => {
+    setUploadingDav(true);
+    setDavResult(null);
+    invoke<{ uploaded: number; skipped: number; failed: number; bytes: number; errors: string[] }>(
+      "upload_backups_to_webdav",
+    )
+      .then((r) => {
+        if (r.uploaded === 0 && r.skipped === 0 && r.failed === 0) {
+          setDavResult({ ok: false, text: t("settings.extensions.webdav.uploadNone") });
+          return;
+        }
+        const text =
+          t("settings.extensions.webdav.uploadDone", {
+            uploaded: r.uploaded,
+            skipped: r.skipped,
+            failed: r.failed,
+          }) + (r.errors.length ? `：${r.errors[0]}` : "");
+        setDavResult({ ok: r.failed === 0, text });
+      })
+      .catch((e) => setDavResult({ ok: false, text: String(e) }))
+      .finally(() => setUploadingDav(false));
   };
 
   const [migrateAsk, setMigrateAsk] = useState<string | null>(null);
@@ -608,6 +634,22 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                           ? t("settings.extensions.webdav.testing")
                           : t("settings.extensions.webdav.test")}
                       </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={uploadAllDav}
+                        disabled={uploadingDav || !webdavEnabled}
+                        className="shrink-0"
+                      >
+                        {uploadingDav ? (
+                          <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+                        ) : (
+                          <UploadCloud className="mr-1.5 size-3.5" />
+                        )}
+                        {uploadingDav
+                          ? t("settings.extensions.webdav.uploading")
+                          : t("settings.extensions.webdav.upload")}
+                      </Button>
                       {davResult && (
                         <span
                           className={`text-xs ${davResult.ok ? "text-emerald-500" : "text-destructive"}`}
@@ -616,6 +658,9 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                         </span>
                       )}
                     </div>
+                    <p className="text-xs leading-relaxed text-muted-foreground">
+                      {t("settings.extensions.webdav.uploadHint")}
+                    </p>
                     <p className="text-xs leading-relaxed text-muted-foreground">
                       {t("settings.extensions.webdav.passHint")}
                     </p>

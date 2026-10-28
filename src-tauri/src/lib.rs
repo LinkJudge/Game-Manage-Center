@@ -913,6 +913,189 @@ fn test_webdav(
     })
 }
 
+
+// ---------------------------------------------------------------- 云存档上传
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CloudUploadReport {
+    uploaded: usize,
+    skipped: usize,
+    failed: usize,
+    bytes: u64,
+    errors: Vec<String>,
+}
+
+/// 云端目录名（固定一级目录，所有备份平铺在里面）
+const CLOUD_DIR: &str = "GameManageCenter";
+
+/// 遍历备份根目录：返回 (游戏目录名, 实例目录, 时间戳)
+fn collect_instances(root: &std::path::Path) -> Vec<(String, std::path::PathBuf, String)> {
+    let mut out = Vec::new();
+    let Ok(games) = std::fs::read_dir(root) else { return out };
+    let mut game_dirs: Vec<_> = games.filter_map(|e| e.ok()).map(|e| e.path()).collect();
+    game_dirs.sort();
+    for game_dir in game_dirs {
+        if !game_dir.is_dir() {
+            continue;
+        }
+        let game_name = game_dir
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let Ok(insts) = std::fs::read_dir(&game_dir) else { continue };
+        let mut inst_dirs: Vec<_> = insts.filter_map(|e| e.ok()).map(|e| e.path()).collect();
+        inst_dirs.sort();
+        for inst in inst_dirs {
+            // 实例目录必须含 manifest.json；同级的 game.json 是目录归属索引，跳过
+            if !inst.is_dir() || !inst.join("manifest.json").exists() {
+                continue;
+            }
+            let ts = inst
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            out.push((game_name.clone(), inst.clone(), ts));
+        }
+    }
+    out
+}
+
+/// 从 manifest 读游戏名（比目录名更准，目录名可能被 sanitize 过）
+fn manifest_title(instance_dir: &std::path::Path) -> Option<String> {
+    let text = std::fs::read_to_string(instance_dir.join("manifest.json")).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    v.get("title")
+        .and_then(|t| t.as_str())
+        .filter(|t| !t.trim().is_empty())
+        .map(str::to_string)
+}
+
+fn upload_all_blocking(
+    cfg: &webdav::Config,
+    root: &std::path::Path,
+) -> Result<CloudUploadReport, String> {
+    // 云端一级目录
+    webdav::ensure_dir(cfg, &[CLOUD_DIR])?;
+
+    let mut existing: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for entry in webdav::list(cfg, CLOUD_DIR).unwrap_or_default() {
+        if let Some(name) = entry.path.rsplit('/').next() {
+            existing.insert(name.to_string());
+        }
+    }
+
+    let tmp_dir = std::env::temp_dir().join("gm-cloud-upload");
+    std::fs::create_dir_all(&tmp_dir).map_err(|e| format!("创建临时目录失败: {e}"))?;
+
+    let mut report = CloudUploadReport {
+        uploaded: 0,
+        skipped: 0,
+        failed: 0,
+        bytes: 0,
+        errors: Vec::new(),
+    };
+
+    for (game_dir, inst_dir, created) in collect_instances(root) {
+        let title = manifest_title(&inst_dir).unwrap_or(game_dir);
+        let out_zip = tmp_dir.join(format!(
+            "{}__{}.zip",
+            gm_core::cloud::safe_name(&title),
+            gm_core::cloud::safe_name(&created)
+        ));
+        match gm_core::cloud::build_bundle(&inst_dir, &title, &created, &out_zip, true) {
+            Ok(info) => {
+                if existing.contains(&info.file_name) {
+                    report.skipped += 1;
+                } else {
+                    match std::fs::read(&out_zip) {
+                        Ok(bytes) => {
+                            let remote = format!("{CLOUD_DIR}/{}", info.file_name);
+                            match webdav::upload(cfg, &remote, bytes) {
+                                Ok(n) => {
+                                    report.uploaded += 1;
+                                    report.bytes += n;
+                                }
+                                Err(e) => {
+                                    report.failed += 1;
+                                    report.errors.push(format!("{}: {e}", info.file_name));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            report.failed += 1;
+                            report.errors.push(format!("{}: 读取压缩包失败 {e}", info.file_name));
+                        }
+                    }
+                }
+                std::fs::remove_file(&out_zip).ok();
+            }
+            Err(e) => {
+                report.failed += 1;
+                report.errors.push(format!("{title}: {e}"));
+            }
+        }
+    }
+
+    std::fs::remove_dir_all(&tmp_dir).ok();
+    Ok(report)
+}
+
+/// 把全部备份打包上传到 WebDAV（云端已有的同名文件跳过）
+#[tauri::command]
+async fn upload_backups_to_webdav(
+    state: tauri::State<'_, AppState>,
+) -> Result<CloudUploadReport, String> {
+    let (cfg, root) = {
+        let s = state.settings.lock().unwrap();
+        if !s.webdav_enabled {
+            return Err("未启用云存档，请先在「设置 → 扩展」里打开".into());
+        }
+        let url = s
+            .webdav_url
+            .clone()
+            .filter(|u| !u.trim().is_empty())
+            .ok_or_else(|| "未配置 WebDAV 地址".to_string())?;
+        (
+            webdav::Config {
+                url,
+                username: s.webdav_username.clone(),
+                password: s.webdav_password.clone(),
+            },
+            state.backups_root(),
+        )
+    };
+    tauri::async_runtime::spawn_blocking(move || upload_all_blocking(&cfg, &root))
+        .await
+        .map_err(|e| format!("任务失败: {e}"))?
+}
+
+/// 列出云端已有备份（文件名、大小、修改时间）
+#[tauri::command]
+async fn list_cloud_backups(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<webdav::RemoteEntry>, String> {
+    let cfg = {
+        let s = state.settings.lock().unwrap();
+        if !s.webdav_enabled {
+            return Err("未启用云存档".into());
+        }
+        let url = s
+            .webdav_url
+            .clone()
+            .filter(|u| !u.trim().is_empty())
+            .ok_or_else(|| "未配置 WebDAV 地址".to_string())?;
+        webdav::Config {
+            url,
+            username: s.webdav_username.clone(),
+            password: s.webdav_password.clone(),
+        }
+    };
+    tauri::async_runtime::spawn_blocking(move || webdav::list(&cfg, CLOUD_DIR))
+        .await
+        .map_err(|e| format!("任务失败: {e}"))?
+}
+
 #[tauri::command]
 fn pick_folder(app: tauri::AppHandle) -> Option<String> {
     use tauri_plugin_dialog::DialogExt;
@@ -1779,6 +1962,8 @@ pub fn run() {
             update_trainer_catalog,
             add_defender_exclusion,
             test_webdav,
+            upload_backups_to_webdav,
+            list_cloud_backups,
             scan_installed_games,
             save_database_info,
             update_save_database,

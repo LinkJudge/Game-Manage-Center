@@ -119,6 +119,10 @@ mod tests {
             trainer_path: Some("D:\\MyTrainers".into()),
             steamgriddb_api_key: Some("sgdb-test".into()),
             locale: Some("en".into()),
+            webdav_url: Some("https://dav.example.com/dav".into()),
+            webdav_username: Some("demo".into()),
+            webdav_password: Some("secret".into()),
+            webdav_enabled: true,
         };
         settings.save(&path).unwrap();
 
@@ -131,6 +135,10 @@ mod tests {
         assert_eq!(loaded.trainer_path.as_deref(), Some("D:\\MyTrainers"));
         assert_eq!(loaded.steamgriddb_api_key.as_deref(), Some("sgdb-test"));
         assert_eq!(loaded.locale.as_deref(), Some("en"));
+        assert_eq!(loaded.webdav_url.as_deref(), Some("https://dav.example.com/dav"));
+        assert_eq!(loaded.webdav_username.as_deref(), Some("demo"));
+        assert_eq!(loaded.webdav_password.as_deref(), Some("secret"));
+        assert!(loaded.webdav_enabled);
         let _ = std::fs::remove_file(&path);
     }
 }

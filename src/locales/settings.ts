@@ -105,6 +105,13 @@ export const settingsZh: Record<string, string> = {
   "settings.extensions.webdav.ok": "连接成功，根目录 {entries} 个条目",
   "settings.extensions.webdav.fail": "连接失败",
   "settings.extensions.webdav.needUrl": "请先填写服务器地址",
+  "settings.extensions.webdav.upload": "上传全部备份",
+  "settings.extensions.webdav.uploading": "上传中…",
+  "settings.extensions.webdav.uploadDone":
+    "上传 {uploaded} 份，跳过 {skipped} 份，失败 {failed} 份",
+  "settings.extensions.webdav.uploadNone": "没有可上传的备份",
+  "settings.extensions.webdav.uploadHint":
+    "一份备份打成一个 zip（不压缩、不含注册表数据），云端已有的同名文件会自动跳过。",
 };
 
 
@@ -218,5 +225,12 @@ export const settingsEn: Record<string, string> = {
   "settings.extensions.webdav.ok": "Connected, {entries} entries at root",
   "settings.extensions.webdav.fail": "Connection failed",
   "settings.extensions.webdav.needUrl": "Enter the server address first",
+  "settings.extensions.webdav.upload": "Upload all backups",
+  "settings.extensions.webdav.uploading": "Uploading…",
+  "settings.extensions.webdav.uploadDone":
+    "{uploaded} uploaded, {skipped} skipped, {failed} failed",
+  "settings.extensions.webdav.uploadNone": "No backups to upload",
+  "settings.extensions.webdav.uploadHint":
+    "Each backup becomes a single zip (stored, no compression, registry entries excluded). Files already on the server are skipped.",
 
 };

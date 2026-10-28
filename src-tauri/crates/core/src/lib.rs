@@ -9,6 +9,7 @@ pub fn version() -> &'static str {
     VERSION
 }
 
+pub mod cloud;
 pub mod backup;
 pub mod custom;
 pub mod database;
