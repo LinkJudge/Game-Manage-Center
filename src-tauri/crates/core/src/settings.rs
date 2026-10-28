@@ -25,6 +25,14 @@ pub struct AppSettings {
     pub steamgriddb_api_key: Option<String>,
     /// 界面语言：None = 跟随系统；"zh" 中文；"en" English
     pub locale: Option<String>,
+    /// WebDAV 服务器地址（含协议与端口，如 https://dav.example.com/dav）
+    pub webdav_url: Option<String>,
+    /// WebDAV 用户名（留空表示匿名）
+    pub webdav_username: Option<String>,
+    /// WebDAV 密码（仅保存在本机 settings.json，不上传）
+    pub webdav_password: Option<String>,
+    /// 是否启用云存档（开启后备份可上传/恢复）
+    pub webdav_enabled: bool,
 }
 
 impl Default for AppSettings {
@@ -40,6 +48,10 @@ impl Default for AppSettings {
             trainer_path: None,
             steamgriddb_api_key: None,
             locale: None,
+            webdav_url: None,
+            webdav_username: None,
+            webdav_password: None,
+            webdav_enabled: false,
         }
     }
 }

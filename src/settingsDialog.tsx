@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import {
   Archive,
   Blocks,
+  Cloud,
   DatabaseZap,
   ExternalLink,
   FolderOpen,
@@ -140,6 +141,13 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
   const [compress, setCompress] = useState(false);
   const [autoBackupEnabled, setAutoBackupEnabled] = useState(false);
   const [closeToTray, setCloseToTray] = useState(true);
+  // 云存档（WebDAV）
+  const [webdavUrl, setWebdavUrl] = useState<string>("");
+  const [webdavUsername, setWebdavUsername] = useState<string>("");
+  const [webdavPassword, setWebdavPassword] = useState<string>("");
+  const [webdavEnabled, setWebdavEnabled] = useState(false);
+  const [testingDav, setTestingDav] = useState(false);
+  const [davResult, setDavResult] = useState<{ ok: boolean; text: string } | null>(null);
 
   // 只在每次打开时用后端值初始化一次。设置项改为即时保存后，保存会 invalidate
   // settings 查询，若每次都回灌 state，正在输入的内容会被打断、光标会跳。
@@ -158,11 +166,41 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     setCompress(settings.data.compressBackups);
     setAutoBackupEnabled(settings.data.autoBackupEnabled);
     setCloseToTray(settings.data.closeToTray);
+    setWebdavUrl(settings.data.webdavUrl ?? "");
+    setWebdavUsername(settings.data.webdavUsername ?? "");
+    setWebdavPassword(settings.data.webdavPassword ?? "");
+    setWebdavEnabled(settings.data.webdavEnabled);
     // 后端有明确语言设置时以其为准；为空表示跟随系统，保留本地状态
     if (settings.data.locale === "zh" || settings.data.locale === "en") {
       setLocaleSetting(settings.data.locale);
     }
   }, [open, settings.data, setLocaleSetting]);
+
+  // 测试 WebDAV 连接：用当前输入框的值（不必先保存）
+  const testDav = () => {
+    const url = webdavUrl.trim();
+    if (!url) {
+      setDavResult({ ok: false, text: t("settings.extensions.webdav.needUrl") });
+      return;
+    }
+    setTestingDav(true);
+    setDavResult(null);
+    invoke<{ status: number; server: string | null; entries: number }>("test_webdav", {
+      url,
+      username: webdavUsername.trim() || null,
+      password: webdavPassword || null,
+    })
+      .then((info) =>
+        setDavResult({
+          ok: true,
+          text: t("settings.extensions.webdav.ok", { entries: info.entries }),
+        }),
+      )
+      .catch((e) =>
+        setDavResult({ ok: false, text: `${t("settings.extensions.webdav.fail")}：${String(e)}` }),
+      )
+      .finally(() => setTestingDav(false));
+  };
 
   const [migrateAsk, setMigrateAsk] = useState<string | null>(null);
   const [updatingCatalog, setUpdatingCatalog] = useState(false);
@@ -501,6 +539,88 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
               <div>
                 <PaneHeader title={t("settings.extensions.title")} description={t("settings.extensions.desc")} />
                 <div className="space-y-4">
+                  {/* 云存档（WebDAV） */}
+                  <div className="space-y-3 rounded-2xl border bg-card p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <Label className="flex items-center gap-1.5">
+                          <Cloud className="size-3.5" />
+                          {t("settings.extensions.webdav.title")}
+                        </Label>
+                        <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                          {t("settings.extensions.webdav.desc")}
+                        </p>
+                      </div>
+                      <Switch
+                        checked={webdavEnabled}
+                        onCheckedChange={(v) => {
+                          setWebdavEnabled(v);
+                          save.mutate({ webdavEnabled: v });
+                        }}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Input
+                        value={webdavUrl}
+                        onChange={(e) => setWebdavUrl(e.target.value)}
+                        onBlur={() => save.mutate({ webdavUrl: webdavUrl.trim() })}
+                        placeholder={t("settings.extensions.webdav.urlPlaceholder")}
+                        className="font-mono text-xs"
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
+                      <div className="grid grid-cols-2 gap-2">
+                        <Input
+                          value={webdavUsername}
+                          onChange={(e) => setWebdavUsername(e.target.value)}
+                          onBlur={() => save.mutate({ webdavUsername: webdavUsername.trim() })}
+                          placeholder={t("settings.extensions.webdav.user")}
+                          className="text-xs"
+                          autoComplete="off"
+                        />
+                        <Input
+                          type="password"
+                          value={webdavPassword}
+                          onChange={(e) => setWebdavPassword(e.target.value)}
+                          onBlur={() => save.mutate({ webdavPassword })}
+                          placeholder={t("settings.extensions.webdav.pass")}
+                          className="text-xs"
+                          autoComplete="off"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={testDav}
+                        disabled={testingDav}
+                        className="shrink-0"
+                      >
+                        {testingDav ? (
+                          <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+                        ) : (
+                          <Cloud className="mr-1.5 size-3.5" />
+                        )}
+                        {testingDav
+                          ? t("settings.extensions.webdav.testing")
+                          : t("settings.extensions.webdav.test")}
+                      </Button>
+                      {davResult && (
+                        <span
+                          className={`text-xs ${davResult.ok ? "text-emerald-500" : "text-destructive"}`}
+                        >
+                          {davResult.text}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs leading-relaxed text-muted-foreground">
+                      {t("settings.extensions.webdav.passHint")}
+                    </p>
+                  </div>
+
                   <div className="space-y-3 rounded-2xl border bg-card p-4">
                     <div>
                       <Label>{t("settings.extensions.sgdbKey.label")}</Label>

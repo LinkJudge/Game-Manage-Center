@@ -90,7 +90,23 @@ export const settingsZh: Record<string, string> = {
     "是否把旧位置里现有的全部备份迁移到新位置？选择「不迁移」的话，旧备份会留在原处，之后的备份写入新位置。",
   "settings.migrate.skip": "不迁移",
   "settings.migrate.do": "迁移",
+
+  "settings.extensions.webdav.title": "云存档（WebDAV）",
+  "settings.extensions.webdav.desc":
+    "把备份同步到自己的 WebDAV 服务器，支持坚果云、Nextcloud、群晖等。",
+  "settings.extensions.webdav.enable": "启用云存档",
+  "settings.extensions.webdav.urlPlaceholder": "https://dav.jianguoyun.com/dav",
+  "settings.extensions.webdav.user": "用户名",
+  "settings.extensions.webdav.pass": "密码",
+  "settings.extensions.webdav.passHint":
+    "坚果云等服务需填「应用密码」，不是网页登录密码。密码只保存在本机 settings.json。",
+  "settings.extensions.webdav.test": "测试连接",
+  "settings.extensions.webdav.testing": "连接中…",
+  "settings.extensions.webdav.ok": "连接成功，根目录 {entries} 个条目",
+  "settings.extensions.webdav.fail": "连接失败",
+  "settings.extensions.webdav.needUrl": "请先填写服务器地址",
 };
+
 
 export const settingsEn: Record<string, string> = {
   "settings.dialog.title": "Settings",
@@ -188,4 +204,19 @@ export const settingsEn: Record<string, string> = {
     "Move all existing backups from the old location to the new one? If you skip, old backups stay where they are and only new backups go to the new location.",
   "settings.migrate.skip": "Don't move",
   "settings.migrate.do": "Move",
+  "settings.extensions.webdav.title": "Cloud saves (WebDAV)",
+  "settings.extensions.webdav.desc":
+    "Sync backups to your own WebDAV server — Nutstore, Nextcloud, Synology, etc.",
+  "settings.extensions.webdav.enable": "Enable cloud saves",
+  "settings.extensions.webdav.urlPlaceholder": "https://dav.jianguoyun.com/dav",
+  "settings.extensions.webdav.user": "Username",
+  "settings.extensions.webdav.pass": "Password",
+  "settings.extensions.webdav.passHint":
+    "Services like Nutstore require an app-specific password, not your login password. Stored only in the local settings.json.",
+  "settings.extensions.webdav.test": "Test connection",
+  "settings.extensions.webdav.testing": "Connecting…",
+  "settings.extensions.webdav.ok": "Connected, {entries} entries at root",
+  "settings.extensions.webdav.fail": "Connection failed",
+  "settings.extensions.webdav.needUrl": "Enter the server address first",
+
 };

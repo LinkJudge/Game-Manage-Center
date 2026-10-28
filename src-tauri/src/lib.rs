@@ -1,6 +1,7 @@
 ﻿mod auto_backup;
 mod game_cover;
 mod steamgriddb;
+mod webdav;
 
 use gm_core::settings::AppSettings;
 use serde::{Deserialize, Serialize};
@@ -817,6 +818,10 @@ fn save_settings(
     trainer_path: Option<String>,
     steamgriddb_api_key: Option<String>,
     locale: Option<String>,
+    webdav_url: Option<String>,
+    webdav_username: Option<String>,
+    webdav_password: Option<String>,
+    webdav_enabled: Option<bool>,
 ) -> Result<AppSettings, String> {
     let was_enabled = state.settings.lock().unwrap().auto_backup_enabled;
     let mut settings = state.settings.lock().unwrap().clone();
@@ -853,6 +858,27 @@ fn save_settings(
             _ => None,
         };
     }
+    if let Some(v) = webdav_url {
+        settings.webdav_url = if v.trim().is_empty() {
+            None
+        } else {
+            Some(v.trim().trim_end_matches('/').to_string())
+        };
+    }
+    if let Some(v) = webdav_username {
+        settings.webdav_username = if v.trim().is_empty() {
+            None
+        } else {
+            Some(v.trim().to_string())
+        };
+    }
+    if let Some(v) = webdav_password {
+        // 密码允许留空（部分服务器匿名可写）；空串视为清除
+        settings.webdav_password = if v.is_empty() { None } else { Some(v) };
+    }
+    if let Some(v) = webdav_enabled {
+        settings.webdav_enabled = v;
+    }
     state.persist(&settings)?;
     // 全局自动备份开关变化 → 立即应用（开启：扫描并挂线程；关闭：全部停止）
     if settings.auto_backup_enabled != was_enabled {
@@ -864,6 +890,27 @@ fn save_settings(
         });
     }
     Ok(settings)
+}
+
+/// 测试 WebDAV 连接：对根目录发 PROPFIND，能拿到 2xx/207 即视为可用
+#[tauri::command]
+fn test_webdav(
+    url: String,
+    username: Option<String>,
+    password: Option<String>,
+) -> Result<webdav::Info, String> {
+    let trimmed = url.trim().trim_end_matches('/').to_string();
+    if trimmed.is_empty() {
+        return Err("请先填写 WebDAV 地址".into());
+    }
+    if !trimmed.starts_with("http://") && !trimmed.starts_with("https://") {
+        return Err("地址需以 http:// 或 https:// 开头".into());
+    }
+    webdav::test(&webdav::Config {
+        url: trimmed,
+        username: username.filter(|s| !s.trim().is_empty()),
+        password: password.filter(|s| !s.is_empty()),
+    })
 }
 
 #[tauri::command]
@@ -1731,6 +1778,7 @@ pub fn run() {
             check_trainer_updates,
             update_trainer_catalog,
             add_defender_exclusion,
+            test_webdav,
             scan_installed_games,
             save_database_info,
             update_save_database,

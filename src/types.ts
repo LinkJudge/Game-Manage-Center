@@ -77,7 +77,20 @@ export interface ConflictInfo {
   backupMs: number | null;
 }
 
-export interface AppSettings { backupPath: string | null; maxBackups: number; compressBackups: boolean; autoBackupEnabled: boolean; closeToTray: boolean; trainerPath: string | null; steamgriddbApiKey: string | null; locale: string | null; }
+export interface AppSettings {
+  backupPath: string | null;
+  maxBackups: number;
+  compressBackups: boolean;
+  autoBackupEnabled: boolean;
+  closeToTray: boolean;
+  trainerPath: string | null;
+  steamgriddbApiKey: string | null;
+  locale: string | null;
+  webdavUrl: string | null;
+  webdavUsername: string | null;
+  webdavPassword: string | null;
+  webdavEnabled: boolean;
+}
 
 
 export interface BatchResult {
