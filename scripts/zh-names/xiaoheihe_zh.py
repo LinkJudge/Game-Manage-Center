@@ -106,11 +106,13 @@ class Session:
     """带 Cookie 的会话 + 拟人节奏。"""
 
     def __init__(self, min_delay: float, max_delay: float, pause_every: tuple[int, int],
-                 pause_range: tuple[float, float]) -> None:
+                 pause_range: tuple[float, float], use_proxy: bool = False) -> None:
         self.jar = CookieJar()
-        self.opener = urllib.request.build_opener(
-            urllib.request.HTTPCookieProcessor(self.jar)
-        )
+        handlers: list = [urllib.request.HTTPCookieProcessor(self.jar)]
+        if not use_proxy:
+            # 小黑盒是国内站：走海外代理反而更像爬虫，直连更接近真人行为
+            handlers.append(urllib.request.ProxyHandler({}))
+        self.opener = urllib.request.build_opener(*handlers)
         self.min_delay = min_delay
         self.max_delay = max_delay
         self.pause_every = pause_every
@@ -283,6 +285,8 @@ def main() -> int:
                         help="触发封禁后多少小时内拒绝重跑")
     parser.add_argument("--force", action="store_true", help="忽略冷却标记直接运行")
     parser.add_argument("--no-shuffle", action="store_true", help="保持标题顺序（默认随机打散）")
+    parser.add_argument("--use-proxy", action="store_true",
+                        help="走系统代理（默认直连；小黑盒是国内站，直连更安全）")
     parser.add_argument("--hot", type=Path, default=None,
                         help="热销榜 JSON（steam_topsellers.py 产出），只抓榜上游戏并按热度排序")
     parser.add_argument("--hot-top", type=int, default=0,
@@ -386,6 +390,7 @@ def main() -> int:
         max_delay=max_delay,
         pause_every=tuple(args.pause_every),
         pause_range=tuple(args.pause_range),
+        use_proxy=args.use_proxy,
     )
     print("正在模拟浏览器访问站点（热身）……")
     try:

@@ -80,11 +80,19 @@ def has_cjk(text: str | None) -> bool:
 class Fetcher:
     """带重试、退避与地区回退的 appdetails 取数器。"""
 
-    def __init__(self, min_delay: float, max_delay: float, retries: int, cc_order: list[str]):
+    def __init__(
+        self,
+        min_delay: float,
+        max_delay: float,
+        retries: int,
+        cc_order: list[str],
+        timeout: int = 12,
+    ):
         self.min_delay = min_delay
         self.max_delay = max_delay
         self.retries = retries
         self.cc_order = cc_order
+        self.timeout = timeout
         self.net_failures = 0
         self.requests = 0
 
@@ -110,7 +118,7 @@ class Fetcher:
                     url, headers={"User-Agent": UA, "Accept": "application/json"}
                 )
                 try:
-                    with urllib.request.urlopen(request, timeout=30) as response:
+                    with urllib.request.urlopen(request, timeout=self.timeout) as response:
                         payload = json.loads(response.read().decode("utf-8"))
                 except urllib.error.HTTPError as error:
                     if error.code in (429, 403):
@@ -119,7 +127,7 @@ class Fetcher:
                         last_net = error
                         continue
                     if error.code >= 500:
-                        wait = min(60, 5 * (attempt + 1))
+                        wait = min(8, 2 * (attempt + 1))
                         print(f"      ! HTTP {error.code}（cc={cc or 'default'}）{wait}s 后重试")
                         time.sleep(wait)
                         last_net = error
@@ -128,13 +136,13 @@ class Fetcher:
                     last_net = error
                     break
                 except (urllib.error.URLError, socket.timeout, TimeoutError, OSError) as error:
-                    wait = min(60, 5 * (attempt + 1))
+                    wait = min(8, 2 * (attempt + 1))
                     print(f"      ! 网络 {type(error).__name__}（cc={cc or 'default'}）{wait}s 后重试")
                     time.sleep(wait)
                     last_net = error
                     continue
                 except json.JSONDecodeError as error:
-                    wait = min(30, 5 * (attempt + 1))
+                    wait = min(6, 2 * (attempt + 1))
                     print(f"      ! 响应不是 JSON，{wait}s 后重试")
                     time.sleep(wait)
                     last_net = error
@@ -163,9 +171,10 @@ def main() -> int:
     parser.add_argument("--only-hot", action="store_true", help="只处理热销榜范围内的游戏")
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--budget", type=int, default=300, help="本轮最多处理多少个游戏")
-    parser.add_argument("--min-delay", type=float, default=2.0)
-    parser.add_argument("--max-delay", type=float, default=4.0)
-    parser.add_argument("--retries", type=int, default=3)
+    parser.add_argument("--min-delay", type=float, default=1.3)
+    parser.add_argument("--max-delay", type=float, default=2.2)
+    parser.add_argument("--retries", type=int, default=1)
+    parser.add_argument("--timeout", type=int, default=12, help="单次请求超时（秒）")
     parser.add_argument("--retry-errors", action="store_true", help="重跑上一轮网络失败的条目")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
@@ -226,7 +235,9 @@ def main() -> int:
         print("没有待处理记录。")
         return 0
 
-    fetcher = Fetcher(args.min_delay, args.max_delay, args.retries, ["cn", "us", ""])
+    fetcher = Fetcher(
+        args.min_delay, args.max_delay, args.retries, ["cn", "us"], args.timeout
+    )
     buf: list[tuple[str, str | None, str | None, str, str]] = []
     stats = {"ok": 0, "en_only": 0, "missing": 0, "error": 0}
     processed = 0
@@ -262,6 +273,9 @@ def main() -> int:
         checked_at = datetime.now().isoformat(timespec="seconds")
 
         found_zh, name_zh, fatal_zh = fetcher.get(appid, "schinese")
+
+        # 分支 1：中文请求网络失败 —— 直接记 error，不补英文请求
+        # （补英文要再发 2 次，网络差时纯浪费；error 条目最后用 --retry-errors 统一补）
         if fatal_zh:
             stats["error"] += 1
             buf.append((appid, None, None, "error", checked_at))
@@ -270,28 +284,34 @@ def main() -> int:
                 flush()
             continue
 
-        found_en, name_en, fatal_en = fetcher.get(appid, "english")
-        if fatal_en:
-            stats["error"] += 1
-            buf.append((appid, None, None, "error", checked_at))
-            print(f"[{index}/{len(targets)}] {appid} -> 网络失败，跳过")
+        # 分支 2：官方明确查不到这个 appid
+        if not found_zh:
+            stats["missing"] += 1
+            buf.append((appid, None, None, "missing", checked_at))
+            print(f"[{index}/{len(targets)}] {appid} -> 官方无此条目")
             if len(buf) >= 20:
                 flush()
             continue
 
-        if not found_zh and not found_en:
-            stats["missing"] += 1
-            buf.append((appid, None, None, "missing", checked_at))
-            print(f"[{index}/{len(targets)}] {appid} -> 官方无此条目")
-        elif has_cjk(name_zh):
-            stats["ok"] += 1
+        # 分支 3：中文位返回的是纯英文 → 官方没做本地化，
+        # 这个值本身就是官方英文名，不用再发第二次请求（省掉约 58% 的请求量）
+        if not has_cjk(name_zh):
+            stats["en_only"] += 1
+            buf.append((appid, name_zh, name_zh, "en_only", checked_at))
+            print(f"[{index}/{len(targets)}] {appid} -> 无中文，英文 {name_zh!r}")
+            if len(buf) >= 20:
+                flush()
+            continue
+
+        # 分支 4：拿到了官方中文，再取一次英文名配对
+        found_en, name_en, fatal_en = fetcher.get(appid, "english")
+        stats["ok"] += 1
+        if fatal_en or not found_en:
+            buf.append((appid, name_zh, None, "ok", checked_at))
+            print(f"[{index}/{len(targets)}] {appid} -> 中文「{name_zh}」(英文名未取到)")
+        else:
             buf.append((appid, name_zh, name_en, "ok", checked_at))
             print(f"[{index}/{len(targets)}] {appid} -> 中文「{name_zh}」/ {name_en!r}")
-        else:
-            stats["en_only"] += 1
-            buf.append((appid, name_zh, name_en, "en_only", checked_at))
-            print(f"[{index}/{len(targets)}] {appid} -> 无中文，英文 {name_en!r}")
-
         if len(buf) >= 20:
             flush()
 

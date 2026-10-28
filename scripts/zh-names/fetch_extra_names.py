@@ -54,6 +54,8 @@ def main() -> int:
     parser.add_argument("--pause-range", type=float, nargs=2, default=[45, 90])
     parser.add_argument("--cooldown-hours", type=float, default=6.0)
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--use-proxy", action="store_true",
+                        help="走系统代理（默认直连；小黑盒是国内站，直连更安全）")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -120,6 +122,7 @@ def main() -> int:
         max_delay=args.max_delay,
         pause_every=tuple(args.pause_every),
         pause_range=tuple(args.pause_range),
+        use_proxy=args.use_proxy,
     )
     print("正在模拟浏览器访问站点（热身）……")
     try:

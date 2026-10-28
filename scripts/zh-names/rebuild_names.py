@@ -30,6 +30,7 @@ import csv
 import shutil
 import sqlite3
 import sys
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
@@ -38,7 +39,7 @@ DEFAULT_DB = ROOT / "src-tauri" / "resources" / "database.db"
 BACKUP_DIR = ROOT.parent / ".workbuddy" / "database-backups"
 
 
-def build_plan(conn: sqlite3.Connection) -> list[dict]:
+def build_plan(conn: sqlite3.Connection, drop_legacy: bool = False) -> list[dict]:
     """算出每一行游戏的新旧名字与变化类型。"""
     official = {
         str(r[0]): (r[1], r[2], r[3])
@@ -60,11 +61,19 @@ def build_plan(conn: sqlite3.Connection) -> list[dict]:
         name_zh, name_en, off_status = off if off else (None, None, None)
         xhh_name, xhh_status = xhh.get(str(page_id), (None, None))
 
-        # 中文名：官方 > 小黑盒 > 清空
+        old_zh = (zh_cn or "").strip() or None
+
+        # 中文名：官方 > 小黑盒 > 现有值（人工兜底）
+        # ⚠️ 为什么不默认清空人工兜底：2026-10-29 实测发现清空后，
+        # 赛博朋克 2077 这类「不在热销榜、小黑盒也没覆盖」的 3A 大作会直接变成无中文名。
+        # 采集目前只覆盖 25% 的游戏，清空等于让大量热门游戏显示英文名。
+        # 需要严格「只留自己采集的」时用 --drop-legacy。
         if off_status == "ok" and name_zh:
             new_zh, zh_src = name_zh, "official"
         elif xhh_status == "named" and xhh_name:
             new_zh, zh_src = xhh_name, "xiaoheihe"
+        elif old_zh and not drop_legacy:
+            new_zh, zh_src = old_zh, "legacy"
         else:
             new_zh, zh_src = None, "none"
 
@@ -74,7 +83,6 @@ def build_plan(conn: sqlite3.Connection) -> list[dict]:
             "official(same)" if (name_en or "").strip() else "keep"
         )
 
-        old_zh = (zh_cn or "").strip() or None
         new_zh_v = (new_zh or "").strip() or None
 
         if old_zh == new_zh_v:
@@ -100,6 +108,17 @@ def build_plan(conn: sqlite3.Connection) -> list[dict]:
                 "zh_src": zh_src,
             }
         )
+
+    # ---- title 冲突保护 ----
+    # Steam 官方对同系列多部作品常返回同一个 name（如 Black Ops 7 与 Warzone 2.0 都叫
+    # "Call of Duty®"，CS:GO 与 CS2 都叫 "Counter-Strike 2"）。直接替换会撞 PRIMARY KEY，
+    # 把两个不同游戏并成一条。规则：新名字若在整批结果里不唯一，就保留原名不替换。
+    counts = Counter(r["new_title"] for r in rows)
+    for r in rows:
+        if counts[r["new_title"]] > 1 and r["new_title"] != r["old_title"]:
+            r["new_title"] = r["old_title"]
+            r["title_change"] = "same"
+            r["title_src"] = "conflict-keep"
     return rows
 
 
@@ -194,7 +213,12 @@ def main() -> int:
     parser.add_argument("--db", type=Path, default=DEFAULT_DB)
     parser.add_argument("--csv", type=Path, help="导出差异明细 CSV")
     parser.add_argument(
-        "--apply", action="store_true", help="真正落库（0.5 才用，会先备份数据库）"
+        "--apply", action="store_true", help="真正落库（会先备份数据库）"
+    )
+    parser.add_argument(
+        "--drop-legacy",
+        action="store_true",
+        help="严格模式：清空原作者人工整理的中文名（默认保留作第三优先级兜底）",
     )
     args = parser.parse_args()
 
@@ -203,7 +227,7 @@ def main() -> int:
         return 1
 
     conn = sqlite3.connect(args.db)
-    rows = build_plan(conn)
+    rows = build_plan(conn, args.drop_legacy)
     report(rows, args.csv)
 
     if not args.apply:
