@@ -65,13 +65,21 @@ def main() -> int:
 
     conn = sqlite3.connect(f"file:{args.db}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
+    # 两边都取「独立来源」的中文名做交叉验证：
+    #   左 = Steam 官方（steam_names.status='ok'）
+    #   右 = 小黑盒（name_sources.status='named'）
+    # 不再用 games.name_zh 参与比对——它现在就是按优先级从这两边选出来的，
+    # 自己跟自己比恒等于 100%，没有验证意义。
     rows = conn.execute(
         """
-        SELECT g.pcgw_id AS wiki_page_id, g.name_en AS title, g.steam_appid AS steam_id, g.name_zh AS zh_CN,
+        SELECT g.pcgw_id AS wiki_page_id, g.name_en AS title, g.steam_appid AS steam_id,
+               o.name_zh AS zh_CN,
                n.name AS src_name, n.status AS src_status, n.checked_at
         FROM games g
-        LEFT JOIN name_sources n
+        JOIN name_sources n
           ON n.pcgw_id = g.pcgw_id AND n.source = 'xiaoheihe'
+        LEFT JOIN steam_names o
+          ON CAST(o.steam_appid AS TEXT) = CAST(g.steam_appid AS TEXT) AND o.status = 'ok'
         WHERE n.pcgw_id IS NOT NULL
         """
     ).fetchall()
