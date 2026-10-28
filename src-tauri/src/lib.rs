@@ -1046,7 +1046,10 @@ fn upload_all_blocking(
 async fn upload_backups_to_webdav(
     state: tauri::State<'_, AppState>,
 ) -> Result<CloudUploadReport, String> {
-    let (cfg, root) = {
+    // ⚠️ 必须先取 root：backups_root() 内部会 lock settings，
+    // 若放在下面的锁作用域里调用，同一线程重复加锁会直接死锁。
+    let root = state.backups_root();
+    let cfg = {
         let s = state.settings.lock().unwrap();
         if !s.webdav_enabled {
             return Err("未启用云存档，请先在「设置 → 扩展」里打开".into());
@@ -1056,14 +1059,11 @@ async fn upload_backups_to_webdav(
             .clone()
             .filter(|u| !u.trim().is_empty())
             .ok_or_else(|| "未配置 WebDAV 地址".to_string())?;
-        (
-            webdav::Config {
-                url,
-                username: s.webdav_username.clone(),
-                password: s.webdav_password.clone(),
-            },
-            state.backups_root(),
-        )
+        webdav::Config {
+            url,
+            username: s.webdav_username.clone(),
+            password: s.webdav_password.clone(),
+        }
     };
     tauri::async_runtime::spawn_blocking(move || upload_all_blocking(&cfg, &root))
         .await
@@ -1084,7 +1084,9 @@ async fn download_cloud_backup(
         .filter(|n| n.ends_with(".zip"))
         .ok_or_else(|| "非法的文件名".to_string())?;
 
-    let (cfg, root) = {
+    // 同上：先取 root，避免与 settings 锁互相嵌套导致死锁
+    let root = state.backups_root();
+    let cfg = {
         let s = state.settings.lock().unwrap();
         if !s.webdav_enabled {
             return Err("未启用云存档".into());
@@ -1094,14 +1096,11 @@ async fn download_cloud_backup(
             .clone()
             .filter(|u| !u.trim().is_empty())
             .ok_or_else(|| "未配置 WebDAV 地址".to_string())?;
-        (
-            webdav::Config {
-                url,
-                username: s.webdav_username.clone(),
-                password: s.webdav_password.clone(),
-            },
-            state.backups_root(),
-        )
+        webdav::Config {
+            url,
+            username: s.webdav_username.clone(),
+            password: s.webdav_password.clone(),
+        }
     };
 
     tauri::async_runtime::spawn_blocking(move || {

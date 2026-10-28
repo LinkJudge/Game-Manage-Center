@@ -111,7 +111,7 @@ export const settingsZh: Record<string, string> = {
     "上传 {uploaded} 份，跳过 {skipped} 份，失败 {failed} 份",
   "settings.extensions.webdav.uploadNone": "没有可上传的备份",
   "settings.extensions.webdav.uploadHint":
-    "一份备份打成一个 zip（文本类压缩、已是压缩格式的跳过），不含注册表数据；云端已有的同名文件会自动跳过。",
+    "一份备份打成一个 zip，不含注册表数据；云端已有相同文件会自动跳过。",
   "settings.extensions.webdav.browse": "云端备份",
   "settings.extensions.webdav.browseTitle": "云端备份",
   "settings.extensions.webdav.browseDesc": "共 {count} 份，下载后会解压到本地备份目录",
@@ -239,7 +239,7 @@ export const settingsEn: Record<string, string> = {
     "{uploaded} uploaded, {skipped} skipped, {failed} failed",
   "settings.extensions.webdav.uploadNone": "No backups to upload",
   "settings.extensions.webdav.uploadHint":
-    "Each backup becomes a single zip (text deflated, already-compressed files stored as-is), registry entries excluded. Files already on the server are skipped.",
+    "Each backup becomes a single zip; registry entries excluded. Files already in the cloud are skipped automatically.",
   "settings.extensions.webdav.browse": "Cloud backups",
   "settings.extensions.webdav.browseTitle": "Cloud backups",
   "settings.extensions.webdav.browseDesc": "{count} file(s); downloading extracts into your local backups folder",
