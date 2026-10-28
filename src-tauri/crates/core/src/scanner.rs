@@ -429,6 +429,22 @@ pub fn quick_scan(
 
     let mut games = Vec::new();
     let mut matched_folders: Vec<String> = Vec::new();
+
+    // ① 先按 Steam AppID 精确匹配。
+    // Steam 的安装目录名与游戏名经常对不上（Sekiro / Titanfall2 / Prototype™ /
+    // RESIDENT EVIL 7 biohazard），只靠目录名会漏掉一批已安装游戏。
+    let installed_ids: Vec<&str> = env.steam_apps.keys().map(String::as_str).collect();
+    for chunk in installed_ids.chunks(500) {
+        for mut entry in db.list_games_by_steam_ids(chunk)? {
+            ensure_install_folder(&mut entry, &folder_keys, &env.steam_apps);
+            if let Some(f) = &entry.install_folder {
+                matched_folders.push(f.clone());
+            }
+            games.push(scan_game(&entry, env, home, all_accounts));
+        }
+    }
+
+    // ② 再按安装目录名匹配（覆盖非 Steam 平台、以及库里没有 AppID 的记录）
     for chunk in folders.chunks(500) {
         for mut entry in db.list_games_by_install_folder(chunk)? {
             ensure_install_folder(&mut entry, &folder_keys, &env.steam_apps);

@@ -162,6 +162,26 @@ impl Database {
             .map(|rows| rows.into_iter().map(game_entry_from_row).collect())
     }
 
+    /// 按 Steam AppID 批量查询（扫描首选路径）。
+    /// Steam 的安装目录名与游戏名经常不一致（Sekiro / Titanfall2 / Prototype™），
+    /// 用目录名匹配会漏，用 AppID 才准。列是 INTEGER，比较前统一转文本。
+    pub fn list_games_by_steam_ids(&self, ids: &[&str]) -> Result<Vec<GameEntry>, String> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "{SELECT_COLUMNS} WHERE CAST(steam_appid AS TEXT) IN ({placeholders})"
+        );
+        let mut stmt = self.conn.prepare(&sql).map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(rusqlite::params_from_iter(ids.iter()), map_row)
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
+            .map(|rows| rows.into_iter().map(game_entry_from_row).collect())
+    }
+
     /// 按安装目录名批量查询（快速扫描用；分块由调用方控制 ≤500）
     pub fn list_games_by_install_folder(
         &self,
