@@ -63,15 +63,16 @@ def build_plan(conn: sqlite3.Connection, drop_legacy: bool = False) -> list[dict
 
         old_zh = (zh_cn or "").strip() or None
 
-        # 中文名：官方 > 小黑盒 > 现有值（人工兜底）
-        # ⚠️ 为什么不默认清空人工兜底：2026-10-29 实测发现清空后，
-        # 赛博朋克 2077 这类「不在热销榜、小黑盒也没覆盖」的 3A 大作会直接变成无中文名。
-        # 采集目前只覆盖 25% 的游戏，清空等于让大量热门游戏显示英文名。
-        # 需要严格「只留自己采集的」时用 --drop-legacy。
-        if off_status == "ok" and name_zh:
-            new_zh, zh_src = name_zh, "official"
-        elif xhh_status == "named" and xhh_name:
+        # 中文名：小黑盒 > 官方 > 现有值（人工兜底）
+        # 戢翎 2026-10-29 定：小黑盒优先。理由是 Steam 官方名常带英文括注与书名号
+        # （「斗技场的阿利娜 Alina of the Arena」「《神力科莎EVO》 Assetto Corsa EVO」），
+        # 小黑盒是国内玩家习惯的简洁叫法。
+        # ⚠️ 不默认清空人工兜底：赛博朋克 2077 这类既不在热销榜、小黑盒也没覆盖的
+        # 3A 大作会直接失去中文名。要严格「只留自己采集的」用 --drop-legacy。
+        if xhh_status == "named" and xhh_name:
             new_zh, zh_src = xhh_name, "xiaoheihe"
+        elif off_status == "ok" and name_zh:
+            new_zh, zh_src = name_zh, "official"
         elif old_zh and not drop_legacy:
             new_zh, zh_src = old_zh, "legacy"
         else:

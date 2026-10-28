@@ -69,7 +69,11 @@ cargo test -p gm-core        # 在 src-tauri 下跑，确认读取正常
 | `steam_names.py` | Steam 官方中英文名，`status` 区分 `ok`（有官方中文）/`en_only` |
 | `xiaoheihe_zh.py` | 小黑盒中文名（**默认直连**，`--use-proxy` 才走代理） |
 | `fetch_extra_names.py` | 库外热门游戏中文名 |
-| `rebuild_names.py` | 按 `官方 > 小黑盒 > 人工兜底` 写回 `name_zh` |
+| `rebuild_names.py` | 按 **`小黑盒 > 官方 > 人工兜底`** 写回 `name_zh` |
+
+中文名优先级是 **小黑盒 > 官方**（戢翎 2026-10-29 定）。Steam 官方名常带英文括注与
+书名号（「斗技场的阿利娜 Alina of the Arena」「《神力科莎EVO》 Assetto Corsa EVO」），
+小黑盒是国内玩家习惯的简洁叫法。
 
 ## 迁移历史
 
