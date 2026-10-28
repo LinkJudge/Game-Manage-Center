@@ -1026,9 +1026,31 @@
   }
 }
 
-/* 主题切换时的短促颜色过渡，避免亮度跳变（Apple §14） */
-html.theme-transition, html.theme-transition *, html.theme-transition *::before, html.theme-transition *::after {
-  transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease, fill 180ms ease, stroke 180ms ease !important;
+/* 主题切换：整帧交叉淡入（配合 theme.tsx 的 startViewTransition）
+   不再给所有元素加 color/background 过渡——那会在交叉点产生低对比度的发白瞬间。 */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 220ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  mix-blend-mode: normal;
+}
+::view-transition-old(root) {
+  animation-name: gm-theme-fade-out;
+}
+::view-transition-new(root) {
+  animation-name: gm-theme-fade-in;
+}
+@keyframes gm-theme-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes gm-theme-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+/* 深色下让淡入稍快一点，避免亮部残留过久 */
+.dark ::view-transition-new(root) {
+  animation-duration: 200ms;
 }
 
 /* 内嵌式滚动条（Discord 风格）：实心圆角滑块，与窗口边缘留出缝隙 */

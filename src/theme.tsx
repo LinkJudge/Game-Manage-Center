@@ -21,12 +21,49 @@ export function storedThemeMode(): ThemeMode {
   }
 }
 
-/** 把当前主题应用到 <html> 的 dark 类上；切换时加短暂过渡，避免亮度跳变（Apple §14） */
+/** View Transitions（Chromium 111+ / WebView2 新版支持）——整帧快照交叉淡入 */
+type ViewTransitionDoc = Document & {
+  startViewTransition?: (cb: () => void) => { finished: Promise<void> };
+};
+
+let switching = false;
+
+/**
+ * 把主题应用到 <html> 的 dark 类上。
+ *
+ * 为什么不用「给所有元素加 transition」：
+ * 那样 background-color 与 color 会各自独立渐变，交叉点上背景已经变亮、文字还没变深，
+ * 整屏会出现一瞬间的低对比度（发白、字看不清）。
+ *
+ * 改用 View Transitions：对旧画面做整帧快照，新主题生效后两帧交叉淡入，
+ * 视觉上是「整体溶解」，不会出现逐元素错位。不支持时直接瞬时切换（同样没有中间态）。
+ */
 export function applyThemeClass(mode: ThemeMode) {
   const root = document.documentElement;
-  root.classList.toggle("dark", resolvedTheme(mode) === "dark");
-  root.classList.add("theme-transition");
-  window.setTimeout(() => root.classList.remove("theme-transition"), 260);
+  const nextDark = resolvedTheme(mode) === "dark";
+  if (root.classList.contains("dark") === nextDark) return; // 无变化不折腾
+  if (switching) {
+    root.classList.toggle("dark", nextDark);
+    return;
+  }
+
+  const doc = document as ViewTransitionDoc;
+  if (typeof doc.startViewTransition === "function") {
+    switching = true;
+    const vt = doc.startViewTransition(() => {
+      root.classList.toggle("dark", nextDark);
+    });
+    // 等动画结束再解锁，避免连点叠加多个 transition
+    Promise.resolve(vt.finished)
+      .catch(() => {})
+      .finally(() => {
+        switching = false;
+      });
+    return;
+  }
+
+  // 降级：瞬时切换。宁可没有动画，也不要那段发白的中间态。
+  root.classList.toggle("dark", nextDark);
 }
 
 function readStoredMode(): ThemeMode {
