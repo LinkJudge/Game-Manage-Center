@@ -454,7 +454,7 @@ pub fn quick_scan(
 
     // 兜底匹配可能与主匹配命中同一游戏（另一目录名恰好等于其标题），按 id 去重保序
     let mut seen_ids: std::collections::HashSet<i64> = std::collections::HashSet::new();
-    games.retain(|g| seen_ids.insert(g.entry.wiki_page_id));
+    games.retain(|g| seen_ids.insert(g.entry.pcgw_id));
 
     // 自定义游戏（负数 id）：直接按用户提供的路径扫描
     for custom in customs {
@@ -727,7 +727,7 @@ mod tests {
 
         let entry = GameEntry {
             title: "CoolGame".into(),
-            wiki_page_id: 1,
+            pcgw_id: 1,
             install_folder: Some("CoolGame".into()),
             steam_id: None,
             gog_id: None,
@@ -852,7 +852,7 @@ mod tests {
 
         let entry = GameEntry {
             title: "GhostGame".into(),
-            wiki_page_id: 7,
+            pcgw_id: 7,
             install_folder: Some("GhostGame".into()),
             steam_id: Some("12345".into()), // 已知 id 但无 acf = 已卸载
             gog_id: None,

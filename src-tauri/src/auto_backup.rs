@@ -23,10 +23,10 @@ pub struct AutoBackupManager {
 }
 
 impl AutoBackupManager {
-    fn add_flag(&mut self, wiki_page_id: i64) -> Arc<AtomicBool> {
+    fn add_flag(&mut self, pcgw_id: i64) -> Arc<AtomicBool> {
         let flag = Arc::new(AtomicBool::new(false));
         self.stops
-            .entry(wiki_page_id)
+            .entry(pcgw_id)
             .or_default()
             .push(flag.clone());
         flag
@@ -35,7 +35,7 @@ impl AutoBackupManager {
     /// 为单个游戏启动"存档变化即备份"线程
     pub fn start_watcher(
         &mut self,
-        wiki_page_id: i64,
+        pcgw_id: i64,
         watch_paths: Vec<PathBuf>,
         db_path: PathBuf,
         backups_root: PathBuf,
@@ -45,16 +45,16 @@ impl AutoBackupManager {
         if watch_paths.is_empty() {
             return;
         }
-        let stop = self.add_flag(wiki_page_id);
+        let stop = self.add_flag(pcgw_id);
         std::thread::spawn(move || {
-            run_watcher(wiki_page_id, watch_paths, db_path, backups_root, max_backups, compress, stop);
+            run_watcher(pcgw_id, watch_paths, db_path, backups_root, max_backups, compress, stop);
         });
     }
 
     /// 为单个游戏启动"游戏退出即备份"线程
     pub fn start_exit(
         &mut self,
-        wiki_page_id: i64,
+        pcgw_id: i64,
         exe_names: Vec<String>,
         db_path: PathBuf,
         backups_root: PathBuf,
@@ -64,14 +64,14 @@ impl AutoBackupManager {
         if exe_names.is_empty() {
             return;
         }
-        let stop = self.add_flag(wiki_page_id);
+        let stop = self.add_flag(pcgw_id);
         std::thread::spawn(move || {
-            run_game_exit(wiki_page_id, exe_names, db_path, backups_root, max_backups, compress, stop);
+            run_game_exit(pcgw_id, exe_names, db_path, backups_root, max_backups, compress, stop);
         });
     }
 
-    pub fn stop(&mut self, wiki_page_id: i64) {
-        if let Some(flags) = self.stops.remove(&wiki_page_id) {
+    pub fn stop(&mut self, pcgw_id: i64) {
+        if let Some(flags) = self.stops.remove(&pcgw_id) {
             for flag in flags {
                 flag.store(true, Ordering::SeqCst);
             }
@@ -99,8 +99,8 @@ impl AutoBackupManager {
         }
     }
 
-    pub fn is_active(&self, wiki_page_id: i64) -> bool {
-        self.stops.contains_key(&wiki_page_id)
+    pub fn is_active(&self, pcgw_id: i64) -> bool {
+        self.stops.contains_key(&pcgw_id)
     }
 }
 
@@ -112,7 +112,7 @@ pub fn manager() -> &'static Mutex<AutoBackupManager> {
 
 /// 单次自动备份：现场解析存档路径 → 备份（与手动备份共用同一引擎）
 pub fn run_once(
-    wiki_page_id: i64,
+    pcgw_id: i64,
     db_path: &Path,
     backups_root: &Path,
     max_backups: u32,
@@ -120,8 +120,8 @@ pub fn run_once(
 ) -> Result<(), String> {
     let db = gm_core::database::Database::open_readonly(db_path)?;
     let entry = db
-        .get_game(wiki_page_id)?
-        .ok_or_else(|| format!("数据库里没有 wiki_page_id = {wiki_page_id} 的游戏"))?;
+        .get_game(pcgw_id)?
+        .ok_or_else(|| format!("数据库里没有 pcgw_id = {pcgw_id} 的游戏"))?;
     let env = gm_core::detect::detect();
     let home = home_dir();
     let scanned = gm_core::scanner::scan_game(&entry, &env, &home, false);
@@ -174,7 +174,7 @@ pub fn collect_exe_names(install_path: &Path) -> Vec<String> {
 /// UU 加速器式：轮询进程列表，游戏从"运行中"变为"已退出"的瞬间备份一次。
 /// 之后若游戏再次启动并退出，会再次备份（每次游玩一份）。
 fn run_game_exit(
-    wiki_page_id: i64,
+    pcgw_id: i64,
     exe_names: Vec<String>,
     db_path: PathBuf,
     backups_root: PathBuf,
@@ -185,11 +185,11 @@ fn run_game_exit(
     use sysinfo::System;
 
     if exe_names.is_empty() {
-        eprintln!("[auto-backup {wiki_page_id}] 安装目录里没有 exe，game_exit 退出");
+        eprintln!("[auto-backup {pcgw_id}] 安装目录里没有 exe，game_exit 退出");
         return;
     }
     eprintln!(
-        "[auto-backup {wiki_page_id}] game_exit 已启动，监测 {} 个进程名",
+        "[auto-backup {pcgw_id}] game_exit 已启动，监测 {} 个进程名",
         exe_names.len()
     );
 
@@ -206,9 +206,9 @@ fn run_game_exit(
 
         if was_running && !running {
             // 游戏退出瞬间 → 备份一次
-            match run_once(wiki_page_id, &db_path, &backups_root, max_backups, compress) {
-                Ok(()) => eprintln!("[auto-backup {wiki_page_id}] 游戏退出，已自动备份"),
-                Err(e) => eprintln!("[auto-backup {wiki_page_id}] 退出备份失败: {e}"),
+            match run_once(pcgw_id, &db_path, &backups_root, max_backups, compress) {
+                Ok(()) => eprintln!("[auto-backup {pcgw_id}] 游戏退出，已自动备份"),
+                Err(e) => eprintln!("[auto-backup {pcgw_id}] 退出备份失败: {e}"),
             }
         }
         was_running = running;
@@ -221,11 +221,11 @@ fn run_game_exit(
             std::thread::sleep(Duration::from_millis(150));
         }
     }
-    eprintln!("[auto-backup {wiki_page_id}] game_exit 已停止");
+    eprintln!("[auto-backup {pcgw_id}] game_exit 已停止");
 }
 
 fn run_watcher(
-    wiki_page_id: i64,
+    pcgw_id: i64,
     paths: Vec<PathBuf>,
     db_path: PathBuf,
     backups_root: PathBuf,
@@ -236,7 +236,7 @@ fn run_watcher(
     use notify::Watcher;
 
     if paths.is_empty() {
-        eprintln!("[auto-backup {wiki_page_id}] 没有可监控的存档路径，watcher 退出");
+        eprintln!("[auto-backup {pcgw_id}] 没有可监控的存档路径，watcher 退出");
         return;
     }
 
@@ -244,17 +244,17 @@ fn run_watcher(
     let mut watcher = match notify::recommended_watcher(tx) {
         Ok(w) => w,
         Err(e) => {
-            eprintln!("[auto-backup {wiki_page_id}] 创建 watcher 失败: {e}");
+            eprintln!("[auto-backup {pcgw_id}] 创建 watcher 失败: {e}");
             return;
         }
     };
     for path in &paths {
         let target = if path.is_dir() { path.clone() } else { path.parent().map(PathBuf::from).unwrap_or_else(|| path.clone()) };
         if let Err(e) = watcher.watch(&target, notify::RecursiveMode::Recursive) {
-            eprintln!("[auto-backup {wiki_page_id}] 监控 {target:?} 失败: {e}");
+            eprintln!("[auto-backup {pcgw_id}] 监控 {target:?} 失败: {e}");
         }
     }
-    eprintln!("[auto-backup {wiki_page_id}] watcher 已启动，监控 {} 个路径", paths.len());
+    eprintln!("[auto-backup {pcgw_id}] watcher 已启动，监控 {} 个路径", paths.len());
 
     // 冷却状态机：变化立即备份 → 10 秒冷却 → 冷却期间有改动则补一次
     let cooldown = Duration::from_millis(WATCHER_COOLDOWN_MS);
@@ -277,8 +277,8 @@ fn run_watcher(
                 if now < cooldown_until {
                     pending = true;
                 } else {
-                    if let Err(e) = run_once(wiki_page_id, &db_path, &backups_root, max_backups, compress) {
-                        eprintln!("[auto-backup {wiki_page_id}] 监控备份失败: {e}");
+                    if let Err(e) = run_once(pcgw_id, &db_path, &backups_root, max_backups, compress) {
+                        eprintln!("[auto-backup {pcgw_id}] 监控备份失败: {e}");
                     }
                     cooldown_until = Instant::now() + cooldown;
                 }
@@ -286,8 +286,8 @@ fn run_watcher(
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 if pending && Instant::now() >= cooldown_until {
                     pending = false;
-                    if let Err(e) = run_once(wiki_page_id, &db_path, &backups_root, max_backups, compress) {
-                        eprintln!("[auto-backup {wiki_page_id}] 冷却后补备份失败: {e}");
+                    if let Err(e) = run_once(pcgw_id, &db_path, &backups_root, max_backups, compress) {
+                        eprintln!("[auto-backup {pcgw_id}] 冷却后补备份失败: {e}");
                     }
                     cooldown_until = Instant::now() + cooldown;
                 }
@@ -295,5 +295,5 @@ fn run_watcher(
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
         }
     }
-    eprintln!("[auto-backup {wiki_page_id}] watcher 已停止");
+    eprintln!("[auto-backup {pcgw_id}] watcher 已停止");
 }

@@ -2,7 +2,7 @@
 //!
 //! 持久化为应用数据目录下的 custom_games.json；路径支持与数据库相同的
 //! 占位符模板（{{p|appdata}} 等），跨机器可用。id 使用负数（正数留给
-//! PCGamingWiki 数据库的 wiki_page_id），备份目录/恢复/轮换全部复用主引擎。
+//! PCGamingWiki 数据库的 pcgw_id），备份目录/恢复/轮换全部复用主引擎。
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -64,7 +64,7 @@ pub fn to_game_entry(custom: &CustomGame) -> crate::database::GameEntry {
     }
     crate::database::GameEntry {
         title: custom.name.clone(),
-        wiki_page_id: custom.id,
+        pcgw_id: custom.id,
         install_folder: None,
         steam_id: None,
         gog_id: None,
@@ -112,7 +112,7 @@ mod tests {
             paths: vec![CustomPath { kind: "file".into(), path: "{{p|appdata}}\\X\\save.dat".into() }],
         };
         let entry = to_game_entry(&custom);
-        assert_eq!(entry.wiki_page_id, -5);
+        assert_eq!(entry.pcgw_id, -5);
         assert_eq!(entry.paths.win.len(), 1);
         assert_eq!(entry.platforms, vec!["自定义"]);
     }

@@ -10,7 +10,7 @@ interface ScanStore {
   scanOutput: ScanOutput | null;
   /** 深度扫描结果（含已卸载残留；独立保存，不被常规扫描覆盖） */
   deepOutput: ScanOutput | null;
-  /** 用户主动清理过的残留存档 wikiPageId；常规扫描仍会看到文件夹，但不再展示 */
+  /** 用户主动清理过的残留存档 pcgwId；常规扫描仍会看到文件夹，但不再展示 */
   dismissedLeftoverIds: number[];
   /** 最近扫描完成时间（epoch ms） */
   scannedAt: number | null;

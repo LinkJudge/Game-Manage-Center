@@ -145,7 +145,7 @@ export function BackupTab() {
     staleTime: 30_000,
   });
   const backupById = new Map(
-    (allBackups.data ?? []).map((game) => [game.wikiPageId, game] as const),
+    (allBackups.data ?? []).map((game) => [game.pcgwId, game] as const),
   );
   const {
     scanOutput, deepOutput, clearDeepResult, dismissedLeftoverIds, dismissLeftovers,
@@ -173,7 +173,7 @@ export function BackupTab() {
     if (
       manageGameId != null &&
       allBackups.data &&
-      !allBackups.data.some((game) => game.wikiPageId === manageGameId)
+      !allBackups.data.some((game) => game.pcgwId === manageGameId)
     ) {
       setManageGameId(null);
     }
@@ -201,7 +201,7 @@ export function BackupTab() {
 
   const doBackup = useMutation({
     mutationFn: (id: number) =>
-      invoke<string>("backup_game", { wikiPageId: id, allAccounts: false }),
+      invoke<string>("backup_game", { pcgwId: id, allAccounts: false }),
     onSuccess: (instancePath, id) => {
       toast.success(t("saves.toast.backupDone"), { description: instancePath });
       invalidateAfterBackup(id);
@@ -251,7 +251,7 @@ export function BackupTab() {
   const restoreLatest = useMutation({
     mutationFn: (args: { id: number; date: string; force: boolean }) =>
       invoke<{ restoredPaths: number; errors: string[] }>("restore_backup", {
-        wikiPageId: args.id,
+        pcgwId: args.id,
         date: args.date,
         force: args.force,
       }),
@@ -272,8 +272,8 @@ export function BackupTab() {
   });
 
   const startRestoreLatest = (id: number, title: string) => {
-    invoke<{ wikiPageId: number; backups: { date: string }[] } | null>("list_backups", {
-      wikiPageId: id,
+    invoke<{ pcgwId: number; backups: { date: string }[] } | null>("list_backups", {
+      pcgwId: id,
     })
       .then((data) => {
         if (!data || data.backups.length === 0) {
@@ -282,7 +282,7 @@ export function BackupTab() {
         }
         const date = data.backups[0].date;
         return invoke<ConflictInfo>("check_restore_conflict", {
-          wikiPageId: id,
+          pcgwId: id,
           date,
         }).then((info) => {
           if (info.conflict) {
@@ -310,27 +310,27 @@ export function BackupTab() {
   // 行序：已安装在前、未安装残留统一排在最后（快扫自己也可能有残留——已卸载但存档还在）
   const quickGames = scanOutput?.games ?? [];
   const deepGames = deepOutput?.games ?? [];
-  const quickGameIds = new Set(quickGames.map((g) => g.entry.wikiPageId));
+  const quickGameIds = new Set(quickGames.map((g) => g.entry.pcgwId));
   const quickInstalled = quickGames.filter((g) => g.installPath);
   // 常规扫描可能仍看得到 Steam 卸载后遗留的安装文件夹；清理后要持久隐藏，
   // 否则下一次普通扫描又把它带回来。
   const dismissedIds = new Set(dismissedLeftoverIds ?? []);
   const quickLeftover = quickGames.filter(
-    (g) => !g.installPath && !dismissedIds.has(g.entry.wikiPageId),
+    (g) => !g.installPath && !dismissedIds.has(g.entry.pcgwId),
   );
   const deepLeftover = deepGames.filter(
     (g) =>
       !g.installPath &&
-      !quickGameIds.has(g.entry.wikiPageId) &&
-      !dismissedIds.has(g.entry.wikiPageId),
+      !quickGameIds.has(g.entry.pcgwId) &&
+      !dismissedIds.has(g.entry.pcgwId),
   );
   const merged = [...quickInstalled, ...quickLeftover, ...deepLeftover];
   // 底部统计的"未安装残留"= 当前仍展示的快扫残留 + 深扫残留
   const leftoverCount = quickLeftover.length + deepLeftover.length;
   const leftoverDismissIds = Array.from(
     new Set([
-      ...quickGames.filter((g) => !g.installPath).map((g) => g.entry.wikiPageId),
-      ...deepGames.filter((g) => !g.installPath).map((g) => g.entry.wikiPageId),
+      ...quickGames.filter((g) => !g.installPath).map((g) => g.entry.pcgwId),
+      ...deepGames.filter((g) => !g.installPath).map((g) => g.entry.pcgwId),
     ]),
   );
 
@@ -345,7 +345,7 @@ export function BackupTab() {
   });
 
   const scannedRows: SaveRow[] = games.map((game) => {
-    const id = game.entry.wikiPageId;
+    const id = game.entry.pcgwId;
     const backup = backupById.get(id);
     return {
       key: `scanned-${id}`,
@@ -360,17 +360,17 @@ export function BackupTab() {
     };
   });
 
-  const scannedIds = new Set(merged.map((g) => g.entry.wikiPageId));
+  const scannedIds = new Set(merged.map((g) => g.entry.pcgwId));
   const backupOnlyRows: SaveRow[] = (allBackups.data ?? [])
-    .filter((game) => !scannedIds.has(game.wikiPageId))
+    .filter((game) => !scannedIds.has(game.pcgwId))
     .filter((game) => {
       if (!filter.trim()) return true;
       const q = filter.trim().toLowerCase();
       return game.title.toLowerCase().includes(q) || (game.zhCn ?? "").includes(filter.trim());
     })
     .map((game) => ({
-      key: `backup-${game.wikiPageId}`,
-      id: game.wikiPageId,
+      key: `backup-${game.pcgwId}`,
+      id: game.pcgwId,
       title: game.title,
       zhCn: game.zhCn,
       backup: game,
@@ -380,7 +380,7 @@ export function BackupTab() {
     }));
 
   const backupOnlyTotal = (allBackups.data ?? []).filter(
-    (game) => !scannedIds.has(game.wikiPageId),
+    (game) => !scannedIds.has(game.pcgwId),
   ).length;
 
   const rows: SaveRow[] = [...scannedRows, ...backupOnlyRows];
@@ -411,7 +411,7 @@ export function BackupTab() {
         label: ACTION_COPY.openBackupFolder.full,
         icon: FolderOpen,
         onSelect: () => {
-          invoke("open_game_backup_folder", { wikiPageId: row.id }).catch((e) =>
+          invoke("open_game_backup_folder", { pcgwId: row.id }).catch((e) =>
             toast.error(t("saves.toast.openFailed"), { description: String(e) }),
           );
         },
@@ -461,7 +461,7 @@ export function BackupTab() {
       seen.add(row.id);
       requests.push({
         title: row.title,
-        wikiPageId: row.id,
+        pcgwId: row.id,
         steamId: row.scanned?.entry.steamId ?? null,
       });
     }
@@ -655,7 +655,7 @@ export function BackupTab() {
                             >
                               <GameCover
                                 title={row.title}
-                                wikiPageId={row.id}
+                                pcgwId={row.id}
                                 steamId={row.scanned?.entry.steamId ?? null}
                                 installPath={row.scanned?.installPath ?? null}
                               />
@@ -814,7 +814,7 @@ export function BackupTab() {
         open={coverPickerRow != null}
         onOpenChange={(open) => !open && setCoverPickerRow(null)}
         title={coverPickerRow?.title ?? ""}
-        wikiPageId={coverPickerRow?.id ?? null}
+        pcgwId={coverPickerRow?.id ?? null}
         steamId={coverPickerRow?.scanned?.entry.steamId ?? null}
       />
 

@@ -1,8 +1,10 @@
 //! 游戏数据库（PCGamingWiki 数据）的只读访问层
 //!
-//! schema 与原 GSM 保持一致：games(title PK, wiki_page_id UNIQUE, install_folder,
-//! steam_id, gog_id, save_location JSON, platform JSON, zh_CN) + metadata。
-//! steam_id/gog_id 在库里是动态类型（多为 INTEGER，gog 偶有带注释的 TEXT），统一转文本。
+//! 表结构（`gm.catalog/1`，本项目自建）：
+//! `games(id PK AUTOINCREMENT, pcgw_id UNIQUE, name_en, name_zh, install_dir,
+//! steam_appid, gog_appid, save_paths JSON, stores JSON)` + `catalog_meta` + `name_sources`。
+//! 用自增 id 作主键，标题不再参与主键，改名不会撞键、也不会把不同作品并成一条。
+//! steam_appid/gog_appid 允许动态类型（历史数据里 gog 偶有带注释的文本），读取时统一转文本。
 
 use rusqlite::Connection;
 use serde::Serialize;
@@ -40,7 +42,7 @@ impl SaveLocations {
 #[serde(rename_all = "camelCase")]
 pub struct GameEntry {
     pub title: String,
-    pub wiki_page_id: i64,
+    pub pcgw_id: i64,
     pub install_folder: Option<String>,
     pub steam_id: Option<String>,
     pub gog_id: Option<String>,
@@ -60,7 +62,7 @@ fn value_to_text(value: Option<rusqlite::types::Value>) -> Option<String> {
 
 /// 一行 SQL → 条目（列表查询与目录名查询共用，行元组见 GameRow）
 fn game_entry_from_row(row: GameRow) -> GameEntry {
-    let (title, wiki_page_id, install_folder, steam_id, gog_id, platform, zh_cn, save_location) = row;
+    let (title, pcgw_id, install_folder, steam_id, gog_id, platform, zh_cn, save_location) = row;
     let paths: SaveLocations = save_location
         .as_deref()
         .and_then(|json| serde_json::from_str(json).ok())
@@ -71,7 +73,7 @@ fn game_entry_from_row(row: GameRow) -> GameEntry {
         .unwrap_or_default();
     GameEntry {
         title,
-        wiki_page_id,
+        pcgw_id,
         install_folder,
         steam_id,
         gog_id,
@@ -81,7 +83,9 @@ fn game_entry_from_row(row: GameRow) -> GameEntry {
     }
 }
 
-const SELECT_COLUMNS: &str = "SELECT title, wiki_page_id, install_folder, steam_id, gog_id, platform, zh_CN, save_location FROM games";
+const SELECT_COLUMNS: &str = "SELECT name_en AS title, pcgw_id, install_dir AS install_folder, \
+     steam_appid AS steam_id, gog_appid AS gog_id, stores AS platform, name_zh AS zh_CN, \
+     save_paths AS save_location FROM games";
 
 type GameRow = (
     String,
@@ -142,12 +146,12 @@ impl Database {
                 let escaped =
                     term.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
                 format!(
-                    " WHERE title LIKE '%{escaped}%' ESCAPE '\\' OR zh_CN LIKE '%{escaped}%' ESCAPE '\\'"
+                    " WHERE name_en LIKE '%{escaped}%' ESCAPE '\\' OR name_zh LIKE '%{escaped}%' ESCAPE '\\'"
                 )
             }
         };
         let sql = format!(
-            "{SELECT_COLUMNS}{search_clause} ORDER BY title COLLATE NOCASE LIMIT ?1 OFFSET ?2"
+            "{SELECT_COLUMNS}{search_clause} ORDER BY name_en COLLATE NOCASE LIMIT ?1 OFFSET ?2"
         );
         let mut stmt = self.conn.prepare(&sql).map_err(|e| e.to_string())?;
         let rows = stmt
@@ -167,7 +171,7 @@ impl Database {
             return Ok(Vec::new());
         }
         let placeholders = folders.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-        let sql = format!("{SELECT_COLUMNS} WHERE install_folder IN ({placeholders})");
+        let sql = format!("{SELECT_COLUMNS} WHERE install_dir IN ({placeholders})");
         let mut stmt = self.conn.prepare(&sql).map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map(rusqlite::params_from_iter(folders.iter()), map_row)
@@ -182,7 +186,7 @@ impl Database {
     pub fn title_zh_pairs(&self) -> Result<Vec<(String, Option<String>)>, String> {
         let mut stmt = self
             .conn
-            .prepare("SELECT title, zh_CN FROM games")
+            .prepare("SELECT name_en, name_zh FROM games")
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
@@ -196,7 +200,7 @@ impl Database {
             return Ok(Vec::new());
         }
         let placeholders = titles.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-        let sql = format!("{SELECT_COLUMNS} WHERE title IN ({placeholders}) COLLATE NOCASE");
+        let sql = format!("{SELECT_COLUMNS} WHERE name_en IN ({placeholders}) COLLATE NOCASE");
         let mut stmt = self.conn.prepare(&sql).map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map(rusqlite::params_from_iter(titles.iter()), map_row)
@@ -208,7 +212,7 @@ impl Database {
 
     /// 全量读取（深度扫描用，按标题排序流式收集）
     pub fn list_all_games(&self) -> Result<Vec<GameEntry>, String> {
-        let sql = format!("{SELECT_COLUMNS} ORDER BY title COLLATE NOCASE");
+        let sql = format!("{SELECT_COLUMNS} ORDER BY name_en COLLATE NOCASE");
         let mut stmt = self.conn.prepare(&sql).map_err(|e| e.to_string())?;
         let rows = stmt.query_map([], map_row).map_err(|e| e.to_string())?;
         rows.collect::<Result<Vec<_>, _>>()
@@ -217,10 +221,10 @@ impl Database {
     }
 
     /// 单游戏条目
-    pub fn get_game(&self, wiki_page_id: i64) -> Result<Option<GameEntry>, String> {
-        let sql = format!("{SELECT_COLUMNS} WHERE wiki_page_id = ?1");
+    pub fn get_game(&self, pcgw_id: i64) -> Result<Option<GameEntry>, String> {
+        let sql = format!("{SELECT_COLUMNS} WHERE pcgw_id = ?1");
         let mut stmt = self.conn.prepare(&sql).map_err(|e| e.to_string())?;
-        let mut rows = stmt.query([wiki_page_id]).map_err(|e| e.to_string())?;
+        let mut rows = stmt.query([pcgw_id]).map_err(|e| e.to_string())?;
         match rows.next().map_err(|e| e.to_string())? {
             None => Ok(None),
             Some(row) => Ok(Some(game_entry_from_row(map_row(row).map_err(|e| e.to_string())?))),
@@ -230,13 +234,13 @@ impl Database {
     /// 单游戏存档路径模板（含完整 save_location JSON）
     pub fn get_game_save_locations(
         &self,
-        wiki_page_id: i64,
+        pcgw_id: i64,
     ) -> Result<Option<SaveLocations>, String> {
         let mut stmt = self
             .conn
-            .prepare("SELECT save_location FROM games WHERE wiki_page_id = ?1")
+            .prepare("SELECT save_paths FROM games WHERE pcgw_id = ?1")
             .map_err(|e| e.to_string())?;
-        let mut rows = stmt.query([wiki_page_id]).map_err(|e| e.to_string())?;
+        let mut rows = stmt.query([pcgw_id]).map_err(|e| e.to_string())?;
         match rows.next().map_err(|e| e.to_string())? {
             None => Ok(None),
             Some(row) => {
@@ -272,9 +276,13 @@ mod tests {
     fn search_finds_by_chinese_title() {
         let Some(path) = test_db_path() else { return };
         let db = Database::open_readonly(&path).unwrap();
-        let page = db.list_games(Some("赛博朋克"), 10, 0).unwrap();
-        assert!(!page.is_empty());
-        assert!(page.iter().any(|g| g.wiki_page_id == 97605));
+        // 自适应取一个确实有中文名的样本——中文名覆盖率会随采集进度变化，
+        // 写死具体游戏会让测试在数据更新后假失败。
+        let pairs = db.title_zh_pairs().unwrap();
+        let Some(zh) = pairs.iter().find_map(|(_, z)| z.as_deref()) else { return };
+        let keyword: String = zh.chars().take(2).collect();
+        let page = db.list_games(Some(&keyword), 10, 0).unwrap();
+        assert!(!page.is_empty(), "搜索「{keyword}」应命中（样本中文名「{zh}」）");
         // 动态类型列转文本正常
         assert!(page.iter().any(|g| g.steam_id.is_some()));
     }
@@ -295,6 +303,28 @@ mod tests {
         let game = db.get_game(97605).unwrap().unwrap();
         assert_eq!(game.title, "Cyberpunk 2077");
         assert_eq!(game.steam_id.as_deref(), Some("1091500"));
-        assert!(game.zh_cn.is_some());
+        // 存档路径必须能解析出来（比中文名更稳定：存档数据 100% 覆盖）
+        assert!(game.paths.total() > 0, "Cyberpunk 2077 应有存档路径");
+    }
+
+    /// 自建 schema 的关键收益：多个游戏可以共用同一个英文名而不会撞主键
+    /// （Steam 官方对同系列作品常返回同名，如 CS:GO 与 CS2 都叫 "Counter-Strike 2"）
+    #[test]
+    fn duplicate_display_names_are_allowed() {
+        let Some(path) = test_db_path() else { return };
+        let conn = rusqlite::Connection::open_with_flags(
+            &path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        let dup: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM (SELECT name_en FROM games GROUP BY name_en HAVING COUNT(*)>1)",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(-1);
+        // 0 组也合法；关键是这条 GROUP BY 不报错、主键不冲突
+        assert!(dup >= 0);
     }
 }

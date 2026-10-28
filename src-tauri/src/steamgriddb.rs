@@ -39,7 +39,7 @@ pub struct SgdbOptions {
 #[serde(rename_all = "camelCase")]
 pub struct CoverLookup {
     pub title: String,
-    pub wiki_page_id: Option<i64>,
+    pub pcgw_id: Option<i64>,
     pub steam_id: Option<String>,
 }
 
@@ -296,15 +296,15 @@ pub fn apply_candidate(
     app_data_dir: &Path,
     db_path: &Path,
     title: &str,
-    wiki_page_id: Option<i64>,
+    pcgw_id: Option<i64>,
     steam_id: Option<String>,
     candidate_url: &str,
 ) -> Result<String, String> {
     let bytes = download_icon(candidate_url)?;
     let png = normalize_icon(&bytes).ok_or_else(|| "候选图无法解码".to_string())?;
     let steam_appid =
-        game_cover::resolve_steam_appid(db_path, title, wiki_page_id, steam_id.as_deref());
-    let key = game_cover::cache_key(title, wiki_page_id, steam_appid.as_deref());
+        game_cover::resolve_steam_appid(db_path, title, pcgw_id, steam_id.as_deref());
+    let key = game_cover::cache_key(title, pcgw_id, steam_appid.as_deref());
     game_cover::replace_cached_image(app_data_dir, &key, &png, true)
         .ok_or_else(|| "写入封面缓存失败".to_string())
 }
@@ -328,10 +328,10 @@ pub fn fill_missing(
         let appid = game_cover::resolve_steam_appid(
             db_path,
             &request.title,
-            request.wiki_page_id,
+            request.pcgw_id,
             request.steam_id.as_deref(),
         );
-        let key = game_cover::cache_key(&request.title, request.wiki_page_id, appid.as_deref());
+        let key = game_cover::cache_key(&request.title, request.pcgw_id, appid.as_deref());
         if game_cover::cached_cover_exists(app_data_dir, &key) {
             summary.skipped += 1;
             continue;
@@ -345,7 +345,7 @@ pub fn fill_missing(
                     app_data_dir,
                     db_path,
                     &request.title,
-                    request.wiki_page_id,
+                    request.pcgw_id,
                     request.steam_id.clone(),
                     &candidate.url,
                 )

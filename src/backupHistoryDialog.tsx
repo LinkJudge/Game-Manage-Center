@@ -67,7 +67,7 @@ export function BackupHistoryDialog({
   const restore = useMutation({
     mutationFn: (args: { date: string; force: boolean }) =>
       invoke<{ restoredPaths: number; errors: string[] }>("restore_backup", {
-        wikiPageId: game?.wikiPageId,
+        pcgwId: game?.pcgwId,
         date: args.date,
         force: args.force,
       }),
@@ -89,7 +89,7 @@ export function BackupHistoryDialog({
 
   const doDelete = useMutation({
     mutationFn: (date: string) =>
-      invoke<void>("delete_backup", { wikiPageId: game?.wikiPageId, date }),
+      invoke<void>("delete_backup", { pcgwId: game?.pcgwId, date }),
     onSuccess: () => {
       toast.success(t("dialogs.history.deleted"));
       onChanged();
@@ -100,7 +100,7 @@ export function BackupHistoryDialog({
   const doPin = useMutation({
     mutationFn: (args: { date: string; permanent: boolean }) =>
       invoke<void>("set_backup_permanent", {
-        wikiPageId: game?.wikiPageId,
+        pcgwId: game?.pcgwId,
         date: args.date,
         permanent: args.permanent,
       }),
@@ -113,7 +113,7 @@ export function BackupHistoryDialog({
 
   const startRestore = (date: string) => {
     if (!game) return;
-    invoke<ConflictInfo>("check_restore_conflict", { wikiPageId: game.wikiPageId, date })
+    invoke<ConflictInfo>("check_restore_conflict", { pcgwId: game.pcgwId, date })
       .then((info) => {
         if (info.conflict) setConflict({ date, info });
         else restore.mutate({ date, force: false });

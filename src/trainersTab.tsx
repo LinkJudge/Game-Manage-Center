@@ -815,12 +815,12 @@ export function TrainersTab() {
         coverTitle,
         row.hit?.zhName ?? manifest?.zhName ?? null,
       );
-      const dedupeKey = `${localGame?.entry.wikiPageId ?? ""}|${coverTitle.toLowerCase()}`;
+      const dedupeKey = `${localGame?.entry.pcgwId ?? ""}|${coverTitle.toLowerCase()}`;
       if (seen.has(dedupeKey)) continue;
       seen.add(dedupeKey);
       requests.push({
         title: coverTitle,
-        wikiPageId: localGame?.entry.wikiPageId ?? null,
+        pcgwId: localGame?.entry.pcgwId ?? null,
         steamId: localGame?.entry.steamId ?? null,
       });
     }
@@ -1098,7 +1098,7 @@ export function TrainersTab() {
                           >
                             <GameCover
                               title={coverTitle}
-                              wikiPageId={localGame?.entry.wikiPageId ?? null}
+                              pcgwId={localGame?.entry.pcgwId ?? null}
                               steamId={localGame?.entry.steamId ?? null}
                               installPath={localGame?.installPath ?? null}
                             />
@@ -1228,7 +1228,7 @@ export function TrainersTab() {
         open={coverPickerRow != null}
         onOpenChange={(open) => !open && setCoverPickerRow(null)}
         title={pickerGameTitle}
-        wikiPageId={pickerLocalGame?.entry.wikiPageId ?? null}
+        pcgwId={pickerLocalGame?.entry.pcgwId ?? null}
         steamId={pickerLocalGame?.entry.steamId ?? null}
       />
 

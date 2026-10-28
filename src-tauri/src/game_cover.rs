@@ -17,13 +17,13 @@ const COVER_SIZE: u32 = 256;
 
 pub(crate) fn cache_key(
     title: &str,
-    wiki_page_id: Option<i64>,
+    pcgw_id: Option<i64>,
     steam_appid: Option<&str>,
 ) -> String {
     if let Some(appid) = steam_appid {
         return format!("steam-{appid}");
     }
-    if let Some(id) = wiki_page_id {
+    if let Some(id) = pcgw_id {
         return format!("game-{id}");
     }
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -126,9 +126,9 @@ fn extract_steam_appid(raw: &str) -> Option<String> {
 }
 
 /// 通过 wiki id / 标题从本地数据库补全 Steam AppID（备份记录和修改器只有标题时也适用）
-fn lookup_steam_appid(db_path: &Path, title: &str, wiki_page_id: Option<i64>) -> Option<String> {
+fn lookup_steam_appid(db_path: &Path, title: &str, pcgw_id: Option<i64>) -> Option<String> {
     let db = Database::open_readonly(db_path).ok()?;
-    let entry = if let Some(id) = wiki_page_id {
+    let entry = if let Some(id) = pcgw_id {
         db.get_game(id).ok().flatten()
     } else {
         db.list_games_by_titles(&[title]).ok()?.into_iter().next()
@@ -139,12 +139,12 @@ fn lookup_steam_appid(db_path: &Path, title: &str, wiki_page_id: Option<i64>) ->
 pub(crate) fn resolve_steam_appid(
     db_path: &Path,
     title: &str,
-    wiki_page_id: Option<i64>,
+    pcgw_id: Option<i64>,
     provided: Option<&str>,
 ) -> Option<String> {
     provided
         .and_then(extract_steam_appid)
-        .or_else(|| lookup_steam_appid(db_path, title, wiki_page_id))
+        .or_else(|| lookup_steam_appid(db_path, title, pcgw_id))
 }
 
 /// 手动选图：写入独立的 custom 槽位，自动封面与清理缓存都不会覆盖它
@@ -360,17 +360,17 @@ pub fn fetch_cover(
     app_data_dir: &Path,
     db_path: &Path,
     title: &str,
-    wiki_page_id: Option<i64>,
+    pcgw_id: Option<i64>,
     steam_id: Option<String>,
     install_path: Option<String>,
 ) -> Result<Option<String>, String> {
     let steam_appid = resolve_steam_appid(
         db_path,
         title,
-        wiki_page_id,
+        pcgw_id,
         steam_id.as_deref(),
     );
-    let key = cache_key(title, wiki_page_id, steam_appid.as_deref());
+    let key = cache_key(title, pcgw_id, steam_appid.as_deref());
 
     if let Some(url) = cached_data_url(app_data_dir, &key) {
         return Ok(Some(url));

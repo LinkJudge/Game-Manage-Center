@@ -113,11 +113,11 @@ fn latest_mtime(path: &Path) -> Option<u64> {
 /// 游戏目录归属走 game_dir_for（游戏名布局 + game.json，旧数字布局兜底）。
 fn open_backup_source(
     backups_root: &Path,
-    wiki_page_id: i64,
+    pcgw_id: i64,
     date: &str,
 ) -> Result<(PathBuf, Option<PathBuf>), String> {
     let date = crate::backup::validate_date(date)?;
-    let base = crate::backup::game_dir_for(backups_root, wiki_page_id)
+    let base = crate::backup::game_dir_for(backups_root, pcgw_id)
         .ok_or_else(|| format!("备份不存在: {date}"))?;
     let dir = base.join(date);
     if dir.is_dir() {
@@ -127,7 +127,7 @@ fn open_backup_source(
     if zip.is_file() {
         let tmp = std::env::temp_dir().join(format!(
             "gm-restore-{}-{}-{}",
-            wiki_page_id, date, std::process::id()
+            pcgw_id, date, std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&tmp);
         crate::backup::extract_zip(&zip, &tmp)?;
@@ -151,7 +151,7 @@ pub fn check_restore_conflict(
         .find(|b| b.date == date)
         .ok_or_else(|| format!("找不到备份 {date}"))?;
 
-    let (backup_folder, cleanup) = open_backup_source(backups_root, game.wiki_page_id, date)?;
+    let (backup_folder, cleanup) = open_backup_source(backups_root, game.pcgw_id, date)?;
     let result = {
         let mut latest_backup_ms: Option<u64> = None;
         let mut latest_local_ms: Option<u64> = None;
@@ -212,7 +212,7 @@ pub fn restore_backup(
         .find(|b| b.date == date)
         .ok_or_else(|| format!("找不到备份 {date}"))?;
 
-    let (backup_folder, cleanup) = open_backup_source(backups_root, game.wiki_page_id, date)?;
+    let (backup_folder, cleanup) = open_backup_source(backups_root, game.pcgw_id, date)?;
     let work = (|| -> Result<RestoreResult, String> {
         let mut restored = 0usize;
         let mut errors: Vec<String> = Vec::new();
@@ -393,7 +393,7 @@ mod tests {
     fn test_entry() -> GameEntry {
         GameEntry {
             title: "CoolGame".into(),
-            wiki_page_id: 42,
+            pcgw_id: 42,
             install_folder: Some("InstalledGame".into()),
             steam_id: None,
             gog_id: None,

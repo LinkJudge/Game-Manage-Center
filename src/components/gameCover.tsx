@@ -4,7 +4,7 @@ import { GameMark } from "@/components/gameMark";
 
 interface CoverArgs {
   title: string;
-  wikiPageId?: number | null;
+  pcgwId?: number | null;
   steamId?: string | null;
   installPath?: string | null;
 }
@@ -34,7 +34,7 @@ function release() {
 function coverKey(args: CoverArgs): string {
   return [
     args.steamId ?? "",
-    args.wikiPageId ?? "",
+    args.pcgwId ?? "",
     args.title.trim().toLowerCase(),
   ].join("|");
 }
@@ -49,7 +49,7 @@ async function requestCover(args: CoverArgs): Promise<string | null> {
     try {
       return await invoke<string | null>("get_game_cover", {
         title: args.title,
-        wikiPageId: args.wikiPageId ?? null,
+        pcgwId: args.pcgwId ?? null,
         steamId: args.steamId ?? null,
         installPath: args.installPath ?? null,
       });
@@ -84,13 +84,13 @@ export function refreshAllCovers() {
 /** 游戏方形封面：加载中或无图时回退到字母图标，不产生布局跳动 */
 export function GameCover({
   title,
-  wikiPageId,
+  pcgwId,
   steamId,
   installPath,
 }: CoverArgs) {
   const [src, setSrc] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
-  const key = coverKey({ title, wikiPageId, steamId, installPath });
+  const key = coverKey({ title, pcgwId, steamId, installPath });
 
   useEffect(() => {
     const listener = (nextKey: string, url: string | null) => {
@@ -111,13 +111,13 @@ export function GameCover({
   useEffect(() => {
     let alive = true;
     setSrc(null);
-    requestCover({ title, wikiPageId, steamId, installPath }).then((url) => {
+    requestCover({ title, pcgwId, steamId, installPath }).then((url) => {
       if (alive && url) setSrc(url);
     });
     return () => {
       alive = false;
     };
-  }, [title, wikiPageId, steamId, installPath, revision]);
+  }, [title, pcgwId, steamId, installPath, revision]);
 
   if (!src) return <GameMark title={title} />;
 

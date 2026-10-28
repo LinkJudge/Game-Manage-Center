@@ -10,7 +10,7 @@ export interface SaveLocations {
 
 export interface GameEntry {
   title: string;
-  wikiPageId: number;
+  pcgwId: number;
   installFolder: string | null;
   steamId: string | null;
   gogId: string | null;
@@ -63,7 +63,7 @@ export interface BackupSummary {
 }
 
 export interface GameBackups {
-  wikiPageId: number;
+  pcgwId: number;
   latestBackup: string;
   title: string;
   zhCn: string | null;
@@ -81,7 +81,7 @@ export interface AppSettings { backupPath: string | null; maxBackups: number; co
 
 
 export interface BatchResult {
-  wikiPageId: number;
+  pcgwId: number;
   title: string;
   ok: boolean;
   message: string | null;
@@ -195,7 +195,7 @@ export interface SgdbOptions {
 
 export interface CoverLookup {
   title: string;
-  wikiPageId: number | null;
+  pcgwId: number | null;
   steamId: string | null;
 }
 

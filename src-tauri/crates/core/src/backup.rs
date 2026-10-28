@@ -1,6 +1,6 @@
 //! 备份引擎：实例目录布局、清单读写、压缩打包、轮换与固定。
 //!
-//! 目录布局：`<backups_root>/<wiki_page_id>/<YYYY-MM-DD_HH-mm-ss>/…`，
+//! 目录布局：`<backups_root>/<pcgw_id>/<YYYY-MM-DD_HH-mm-ss>/…`，
 //! 实例名即创建时间戳（精确到秒，同秒重名自动追加序号）。
 //! 每个实例内的 manifest.json 是唯一索引；早期版本实例使用 backup_info.json，
 //! 仍只读兼容——首次修改（固定/补写大小）时自动升级为 manifest.json。
@@ -23,7 +23,10 @@ pub const GAME_INDEX_FILE: &str = "game.json";
 #[serde(rename_all = "camelCase")]
 pub struct GameIndex {
     pub schema: String,
-    pub wiki_page_id: i64,
+    /// PCGamingWiki 页面 ID。新版本写出 `pcgwId`；
+    /// 旧版本写的是 `wikiPageId`，用 alias 保证既有备份目录仍能被识别。
+    #[serde(alias = "wikiPageId", alias = "wiki_page_id")]
+    pub pcgw_id: i64,
     pub title: String,
 }
 
@@ -47,11 +50,11 @@ fn write_game_index(game_dir: &Path, index: &GameIndex) -> Result<(), String> {
     write_json_atomic(&game_dir.join(GAME_INDEX_FILE), index)
 }
 
-/// 解析 wiki_page_id 对应的游戏目录：扫描根目录下各 game.json 归属匹配。
+/// 解析 pcgw_id 对应的游戏目录：扫描根目录下各 game.json 归属匹配。
 /// 兼容旧布局（目录名为数字 id）：数字目录直接匹配。
-pub fn game_dir_for(backups_root: &Path, wiki_page_id: i64) -> Option<PathBuf> {
+pub fn game_dir_for(backups_root: &Path, pcgw_id: i64) -> Option<PathBuf> {
     let entries = fs::read_dir(backups_root).ok()?;
-    let numeric = backups_root.join(wiki_page_id.to_string());
+    let numeric = backups_root.join(pcgw_id.to_string());
     if numeric.is_dir() {
         return Some(numeric); // 旧布局（未迁移时兜底）
     }
@@ -60,7 +63,7 @@ pub fn game_dir_for(backups_root: &Path, wiki_page_id: i64) -> Option<PathBuf> {
         if !dir.is_dir() {
             continue;
         }
-        if read_game_index(&dir).map(|i| i.wiki_page_id) == Some(wiki_page_id) {
+        if read_game_index(&dir).map(|i| i.pcgw_id) == Some(pcgw_id) {
             return Some(dir);
         }
     }
@@ -126,7 +129,7 @@ pub fn migrate_numeric_game_dirs(backups_root: &Path) -> usize {
         let mut target = backups_root.join(&base);
         // 碰撞处理：目标已存在且归属不同 → 追加 id 后缀
         if target != dir {
-            if let Some(owner) = read_game_index(&target).map(|i| i.wiki_page_id) {
+            if let Some(owner) = read_game_index(&target).map(|i| i.pcgw_id) {
                 if owner != id {
                     target = backups_root.join(format!("{base} ({id})"));
                 }
@@ -139,7 +142,7 @@ pub fn migrate_numeric_game_dirs(backups_root: &Path) -> usize {
         if target == dir {
             write_game_index(&dir, &GameIndex {
                 schema: GAME_INDEX_SCHEMA.into(),
-                wiki_page_id: id,
+                pcgw_id: id,
                 title,
             })
             .ok();
@@ -148,7 +151,7 @@ pub fn migrate_numeric_game_dirs(backups_root: &Path) -> usize {
         if fs::rename(&dir, &target).is_ok() {
             write_game_index(&target, &GameIndex {
                 schema: GAME_INDEX_SCHEMA.into(),
-                wiki_page_id: id,
+                pcgw_id: id,
                 title,
             })
             .ok();
@@ -328,7 +331,7 @@ pub struct BackupPathEntry {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GameBackups {
-    pub wiki_page_id: i64,
+    pub pcgw_id: i64,
     pub latest_backup: String,
     pub title: String,
     #[serde(rename = "zhCn")]
@@ -392,13 +395,13 @@ pub fn backup_game(
     let base = game_dir_name(&entry.title);
     let mut game_dir = backups_root.join(&base);
     if game_dir.exists() {
-        let owned = read_game_index(&game_dir).map(|i| i.wiki_page_id) == Some(entry.wiki_page_id);
+        let owned = read_game_index(&game_dir).map(|i| i.pcgw_id) == Some(entry.pcgw_id);
         if !owned {
             let is_empty = fs::read_dir(&game_dir)
                 .map(|mut d| d.next().is_none())
                 .unwrap_or(false);
             if !is_empty {
-                game_dir = backups_root.join(format!("{base} ({})", entry.wiki_page_id));
+                game_dir = backups_root.join(format!("{base} ({})", entry.pcgw_id));
             }
         }
     }
@@ -422,7 +425,7 @@ pub fn backup_game(
     let staging_nanos = chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default();
     let instance_path = std::env::temp_dir().join(format!(
         "gm-staging-{}-{staging_nanos}-{staging_seq}",
-        entry.wiki_page_id
+        entry.pcgw_id
     ));
     let _ = fs::remove_dir_all(&instance_path);
 
@@ -511,7 +514,7 @@ pub fn backup_game(
     fs::create_dir_all(&game_dir).map_err(|e| e.to_string())?;
     write_game_index(&game_dir, &GameIndex {
         schema: GAME_INDEX_SCHEMA.into(),
-        wiki_page_id: entry.wiki_page_id,
+        pcgw_id: entry.pcgw_id,
         title: entry.title.clone(),
     })?;
     let final_path = if compress {
@@ -689,8 +692,8 @@ pub fn apply_rotation(game_backup_path: &Path, max_backups: u32) -> Result<(), S
 }
 
 /// 枚举一个游戏的全部备份（zip 与目录实例混合，按时间戳倒序）
-pub fn list_backups(backups_root: &Path, wiki_page_id: i64) -> Result<Option<GameBackups>, String> {
-    let Some(game_backup_path) = game_dir_for(backups_root, wiki_page_id) else {
+pub fn list_backups(backups_root: &Path, pcgw_id: i64) -> Result<Option<GameBackups>, String> {
+    let Some(game_backup_path) = game_dir_for(backups_root, pcgw_id) else {
         return Ok(None);
     };
 
@@ -744,7 +747,7 @@ pub fn list_backups(backups_root: &Path, wiki_page_id: i64) -> Result<Option<Gam
     }
 
     Ok(Some(GameBackups {
-        wiki_page_id,
+        pcgw_id,
         latest_backup: format_backup_date(&backups[0].date),
         title: backups[0].title.clone(),
         zh_cn: backups[0].zh_cn.clone(),
@@ -778,7 +781,7 @@ pub fn list_all_backups(backups_root: &Path) -> Result<Vec<GameBackups>, String>
         }
         let dir = entry.path();
         let id = match read_game_index(&dir) {
-            Some(index) => index.wiki_page_id,
+            Some(index) => index.pcgw_id,
             None => match dir.file_name().and_then(|n| n.to_string_lossy().parse::<i64>().ok()) {
                 Some(id) => id, // 旧布局数字目录
                 None => continue,
@@ -804,7 +807,7 @@ pub fn backup_counts(backups_root: &Path) -> std::collections::HashMap<i64, u32>
             continue;
         }
         let Some(id) = read_game_index(&dir)
-            .map(|i| i.wiki_page_id)
+            .map(|i| i.pcgw_id)
             .or_else(|| dir.file_name().and_then(|n| n.to_string_lossy().parse::<i64>().ok()))
         else {
             continue;
@@ -839,9 +842,9 @@ fn remove_game_dir_if_empty(game_dir: &Path) {
 }
 
 /// 删除指定备份（目录或 zip）
-pub fn delete_backup(backups_root: &Path, wiki_page_id: i64, date: &str) -> Result<(), String> {
+pub fn delete_backup(backups_root: &Path, pcgw_id: i64, date: &str) -> Result<(), String> {
     let folder = validate_date(date)?;
-    let base = game_dir_for(backups_root, wiki_page_id)
+    let base = game_dir_for(backups_root, pcgw_id)
         .ok_or_else(|| format!("备份不存在: {date}"))?;
     let dir = base.join(folder);
     let zip = base.join(format!("{folder}.zip"));
@@ -857,12 +860,12 @@ pub fn delete_backup(backups_root: &Path, wiki_page_id: i64, date: &str) -> Resu
 /// 设置固定 / 取消固定（目录改清单并迁移；zip 重写包内清单）
 pub fn set_backup_permanent(
     backups_root: &Path,
-    wiki_page_id: i64,
+    pcgw_id: i64,
     date: &str,
     permanent: bool,
 ) -> Result<(), String> {
     let folder = validate_date(date)?;
-    let base = game_dir_for(backups_root, wiki_page_id)
+    let base = game_dir_for(backups_root, pcgw_id)
         .ok_or_else(|| format!("备份不存在: {date}"))?;
     let dir = base.join(folder);
     let zip = base.join(format!("{folder}.zip"));
@@ -900,7 +903,7 @@ mod tests {
     fn test_entry() -> GameEntry {
         GameEntry {
             title: "CoolGame".into(),
-            wiki_page_id: 42,
+            pcgw_id: 42,
             install_folder: Some("CoolGame".into()),
             steam_id: None,
             gog_id: None,
@@ -932,7 +935,7 @@ mod tests {
 
         // 目录结构：backups/CoolGame/<date>/存档/a.sav + manifest.json，game.json 声明归属
         assert_eq!(
-            read_game_index(&backups_root.join("CoolGame")).map(|i| i.wiki_page_id),
+            read_game_index(&backups_root.join("CoolGame")).map(|i| i.pcgw_id),
             Some(42)
         );
         let listed = list_backups(&backups_root, 42).unwrap().unwrap();
@@ -1033,7 +1036,7 @@ mod tests {
         assert!(root.join("OldGame").is_dir());
         assert!(!root.join("42").exists());
         assert_eq!(
-            read_game_index(&root.join("OldGame")).map(|i| i.wiki_page_id),
+            read_game_index(&root.join("OldGame")).map(|i| i.pcgw_id),
             Some(42)
         );
 
@@ -1066,9 +1069,9 @@ mod tests {
         // 空目录可被同名游戏认领；被其他游戏占用时追加 id 后缀
         let claimed = root.join("CoolGame");
         fs::create_dir_all(&claimed).unwrap();
-        let e1 = test_entry(); // wiki_page_id 42, title CoolGame
+        let e1 = test_entry(); // pcgw_id 42, title CoolGame
         let mut e2 = test_entry();
-        e2.wiki_page_id = 99;
+        e2.pcgw_id = 99;
         e2.title = "CoolGame: Remastered".into();
 
         let resolved = vec![ResolvedPath {
@@ -1090,7 +1093,7 @@ mod tests {
         assert!(p2.contains("CoolGame Remastered"), "p2={p2}");
         // 模拟同名冲突：把 99 号游戏标题改成与 42 相同 → 加 (99) 后缀
         let mut e3 = test_entry();
-        e3.wiki_page_id = 99;
+        e3.pcgw_id = 99;
         let p3 = backup_game(&e3, &resolved, &root, 3, false).unwrap();
         assert!(p3.contains("CoolGame (99)"), "碰撞应加 id 后缀: {p3}");
 

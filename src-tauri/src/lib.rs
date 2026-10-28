@@ -1067,7 +1067,7 @@ fn pick_file(app: tauri::AppHandle) -> Option<String> {
 #[tauri::command]
 async fn backup_game(
     state: tauri::State<'_, AppState>,
-    wiki_page_id: i64,
+    pcgw_id: i64,
     all_accounts: Option<bool>,
 ) -> Result<String, String> {
     let db_path = state.db_path.lock().unwrap().clone();
@@ -1077,8 +1077,8 @@ async fn backup_game(
     tauri::async_runtime::spawn_blocking(move || {
         let db = gm_core::database::Database::open_readonly(&db_path)?;
         let entry = db
-            .get_game(wiki_page_id)?
-            .ok_or_else(|| format!("数据库里没有 wiki_page_id = {wiki_page_id} 的游戏"))?;
+            .get_game(pcgw_id)?
+            .ok_or_else(|| format!("数据库里没有 pcgw_id = {pcgw_id} 的游戏"))?;
         let env = gm_core::detect::detect();
         let home = home_dir();
         let scanned =
@@ -1095,11 +1095,11 @@ async fn backup_game(
 #[tauri::command]
 async fn list_backups(
     state: tauri::State<'_, AppState>,
-    wiki_page_id: i64,
+    pcgw_id: i64,
 ) -> Result<Option<gm_core::backup::GameBackups>, String> {
     let root = state.backups_root();
     tauri::async_runtime::spawn_blocking(move || {
-        gm_core::backup::list_backups(&root, wiki_page_id)
+        gm_core::backup::list_backups(&root, pcgw_id)
     })
     .await
     .map_err(|e| format!("任务失败: {e}"))?
@@ -1108,7 +1108,7 @@ async fn list_backups(
 #[tauri::command]
 async fn check_restore_conflict(
     state: tauri::State<'_, AppState>,
-    wiki_page_id: i64,
+    pcgw_id: i64,
     date: String,
 ) -> Result<gm_core::restore::ConflictInfo, String> {
     let root = state.backups_root();
@@ -1116,11 +1116,11 @@ async fn check_restore_conflict(
     tauri::async_runtime::spawn_blocking(move || {
         let db = gm_core::database::Database::open_readonly(&db_path)?;
         let entry = db
-            .get_game(wiki_page_id)?
-            .ok_or_else(|| format!("数据库里没有 wiki_page_id = {wiki_page_id} 的游戏"))?;
+            .get_game(pcgw_id)?
+            .ok_or_else(|| format!("数据库里没有 pcgw_id = {pcgw_id} 的游戏"))?;
         let env = gm_core::detect::detect();
         let home = home_dir();
-        let game = gm_core::backup::list_backups(&root, wiki_page_id)?
+        let game = gm_core::backup::list_backups(&root, pcgw_id)?
             .ok_or_else(|| "该游戏还没有任何备份".to_string())?;
         gm_core::restore::check_restore_conflict(&root, &game, &date, &env, &home).map(|mut info| {
             // 目标不存在时视为无冲突（本地没有存档就谈不上覆盖）
@@ -1143,7 +1143,7 @@ async fn check_restore_conflict(
 #[tauri::command]
 async fn restore_backup(
     state: tauri::State<'_, AppState>,
-    wiki_page_id: i64,
+    pcgw_id: i64,
     date: String,
     force: Option<bool>,
 ) -> Result<gm_core::restore::RestoreResult, String> {
@@ -1151,7 +1151,7 @@ async fn restore_backup(
     tauri::async_runtime::spawn_blocking(move || {
         let env = gm_core::detect::detect();
         let home = home_dir();
-        let game = gm_core::backup::list_backups(&root, wiki_page_id)?
+        let game = gm_core::backup::list_backups(&root, pcgw_id)?
             .ok_or_else(|| "该游戏还没有任何备份".to_string())?;
         gm_core::restore::restore_backup(&root, &game, &date, &env, &home, force.unwrap_or(false))
     })
@@ -1172,12 +1172,12 @@ async fn list_all_backups(
 #[tauri::command]
 async fn delete_backup(
     state: tauri::State<'_, AppState>,
-    wiki_page_id: i64,
+    pcgw_id: i64,
     date: String,
 ) -> Result<(), String> {
     let root = state.backups_root();
     tauri::async_runtime::spawn_blocking(move || {
-        gm_core::backup::delete_backup(&root, wiki_page_id, &date)
+        gm_core::backup::delete_backup(&root, pcgw_id, &date)
     })
     .await
     .map_err(|e| format!("任务失败: {e}"))?
@@ -1186,13 +1186,13 @@ async fn delete_backup(
 #[tauri::command]
 async fn set_backup_permanent(
     state: tauri::State<'_, AppState>,
-    wiki_page_id: i64,
+    pcgw_id: i64,
     date: String,
     permanent: bool,
 ) -> Result<(), String> {
     let root = state.backups_root();
     tauri::async_runtime::spawn_blocking(move || {
-        gm_core::backup::set_backup_permanent(&root, wiki_page_id, &date, permanent)
+        gm_core::backup::set_backup_permanent(&root, pcgw_id, &date, permanent)
     })
     .await
     .map_err(|e| format!("任务失败: {e}"))?
@@ -1227,13 +1227,13 @@ fn refresh_auto_backup_blocking(app: &tauri::AppHandle) -> Result<usize, String>
         false,
         &gm_core::custom::load(&customs_path),
     )?;
-    let keep: Vec<i64> = output.games.iter().map(|g| g.entry.wiki_page_id).collect();
+    let keep: Vec<i64> = output.games.iter().map(|g| g.entry.pcgw_id).collect();
     let mut started = 0usize;
     {
         let mut manager = auto_backup::manager().lock().unwrap();
         manager.retain(&keep); // 停止已不在列表中的游戏（卸载/移除）
         for game in &output.games {
-            let id = game.entry.wiki_page_id;
+            let id = game.entry.pcgw_id;
             if manager.is_active(id) {
                 continue; // 已在监测，不重复挂线程
             }
@@ -1262,7 +1262,7 @@ fn refresh_auto_backup_blocking(app: &tauri::AppHandle) -> Result<usize, String>
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BatchResult {
-    pub wiki_page_id: i64,
+    pub pcgw_id: i64,
     pub title: String,
     pub ok: bool,
     pub message: Option<String>,
@@ -1286,7 +1286,7 @@ async fn batch_backup(
             let result = (|| -> Result<String, String> {
                 let entry = db
                     .get_game(id)?
-                    .ok_or_else(|| format!("数据库里没有 wiki_page_id = {id} 的游戏"))?;
+                    .ok_or_else(|| format!("数据库里没有 pcgw_id = {id} 的游戏"))?;
                 let scanned = gm_core::scanner::scan_game(&entry, &env, &home, false);
                 if scanned.resolved_files.is_empty() {
                     return Err("没有找到可备份的存档文件".to_string());
@@ -1301,7 +1301,7 @@ async fn batch_backup(
                 .map(|e| e.title)
                 .unwrap_or_else(|| id.to_string());
             out.push(BatchResult {
-                wiki_page_id: id,
+                pcgw_id: id,
                 title,
                 ok: result.is_ok(),
                 message: result.err(),
@@ -1345,7 +1345,7 @@ async fn batch_restore_latest(
                     .map(|r| format!("恢复 {} 个路径", r.restored_paths))
             })();
             out.push(BatchResult {
-                wiki_page_id: id,
+                pcgw_id: id,
                 title,
                 ok: result.is_ok(),
                 message: result.err(),
@@ -1398,10 +1398,10 @@ async fn migrate_backups(
 fn open_game_backup_folder(
     app: tauri::AppHandle,
     state: tauri::State<AppState>,
-    wiki_page_id: i64,
+    pcgw_id: i64,
 ) -> Result<(), String> {
     // 只打开已存在的游戏备份目录；绝不创建——未备份的游戏在右键菜单里不出现此项
-    let dir = gm_core::backup::game_dir_for(&state.backups_root(), wiki_page_id)
+    let dir = gm_core::backup::game_dir_for(&state.backups_root(), pcgw_id)
         .ok_or_else(|| "该游戏还没有备份记录".to_string())?;
     use tauri_plugin_opener::OpenerExt;
     app.opener()
@@ -1440,7 +1440,7 @@ fn open_save_folder(app: tauri::AppHandle, path: String) -> Result<(), String> {
 async fn get_game_cover(
     state: tauri::State<'_, AppState>,
     title: String,
-    wiki_page_id: Option<i64>,
+    pcgw_id: Option<i64>,
     steam_id: Option<String>,
     install_path: Option<String>,
 ) -> Result<Option<String>, String> {
@@ -1451,7 +1451,7 @@ async fn get_game_cover(
             &app_data_dir,
             &db_path,
             &title,
-            wiki_page_id,
+            pcgw_id,
             steam_id,
             install_path,
         )
@@ -1488,7 +1488,7 @@ async fn steamgriddb_candidates(
     state: tauri::State<'_, AppState>,
     title: String,
     steam_id: Option<String>,
-    wiki_page_id: Option<i64>,
+    pcgw_id: Option<i64>,
 ) -> Result<steamgriddb::SgdbOptions, String> {
     let api_key = steamgriddb_key(&state)?;
     let db_path = state.db_path.lock().unwrap().clone();
@@ -1496,7 +1496,7 @@ async fn steamgriddb_candidates(
         let appid = game_cover::resolve_steam_appid(
             &db_path,
             &title,
-            wiki_page_id,
+            pcgw_id,
             steam_id.as_deref(),
         );
         steamgriddb::search_candidates(&api_key, &title, appid.as_deref())
@@ -1510,7 +1510,7 @@ async fn steamgriddb_candidates(
 async fn steamgriddb_apply_cover(
     state: tauri::State<'_, AppState>,
     title: String,
-    wiki_page_id: Option<i64>,
+    pcgw_id: Option<i64>,
     steam_id: Option<String>,
     candidate_url: String,
 ) -> Result<String, String> {
@@ -1521,7 +1521,7 @@ async fn steamgriddb_apply_cover(
             &app_data_dir,
             &db_path,
             &title,
-            wiki_page_id,
+            pcgw_id,
             steam_id,
             &candidate_url,
         )

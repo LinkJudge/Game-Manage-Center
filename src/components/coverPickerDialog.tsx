@@ -21,13 +21,13 @@ export function CoverPickerDialog({
   open,
   onOpenChange,
   title,
-  wikiPageId,
+  pcgwId,
   steamId,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
-  wikiPageId?: number | null;
+  pcgwId?: number | null;
   steamId?: string | null;
 }) {
   const { t } = useI18n();
@@ -50,7 +50,7 @@ export function CoverPickerDialog({
     setSelected(null);
     invoke<SgdbOptions>("steamgriddb_candidates", {
       title: value,
-      wikiPageId: useSteamId ? (wikiPageId ?? null) : null,
+      pcgwId: useSteamId ? (pcgwId ?? null) : null,
       steamId: useSteamId ? (steamId ?? null) : null,
     })
       .then((result) => {
@@ -77,12 +77,12 @@ export function CoverPickerDialog({
     setApplying(true);
     invoke<string>("steamgriddb_apply_cover", {
       title: searchTitle.trim() || title,
-      wikiPageId: wikiPageId ?? null,
+      pcgwId: pcgwId ?? null,
       steamId: steamId ?? null,
       candidateUrl: selected.url,
     })
       .then((url) => {
-        setCoverOverride({ title, wikiPageId, steamId }, url);
+        setCoverOverride({ title, pcgwId, steamId }, url);
         toast.success(t("dialogs.cover.updated"));
         onOpenChange(false);
       })
