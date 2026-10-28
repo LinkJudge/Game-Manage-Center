@@ -45,8 +45,13 @@ const PROPFIND_BODY: &str = r#"<?xml version="1.0" encoding="utf-8"?>
 
 fn client() -> Result<Client, String> {
     Client::builder()
-        .timeout(Duration::from_secs(120))
-        .connect_timeout(Duration::from_secs(12))
+        // 关键：禁用环境变量代理。
+        // 应用从开发终端启动时会继承 http_proxy/https_proxy，而 WebDAV 多为国内服务
+        // （坚果云 / 群晖 / 自建 Nextcloud），走代理只会卡到超时——表现为"一直上传、
+        // 云端看不到文件"。若要访问境外 WebDAV，请自行反代到国内可达地址。
+        .no_proxy()
+        .timeout(Duration::from_secs(30))
+        .connect_timeout(Duration::from_secs(8))
         .user_agent("GameManageCenter-WebDAV/1.0")
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))
@@ -182,7 +187,9 @@ pub fn ensure_dir(cfg: &Config, segments: &[&str]) -> Result<(), String> {
         let req = c
             .request(Method::from_bytes(b"MKCOL").unwrap(), &path)
             .header("Content-Length", "0");
+        eprintln!("[webdav] MKCOL {path}");
         let resp = auth(req, cfg).send().map_err(|e| format!("创建目录失败：{e}"))?;
+        eprintln!("[webdav] -> HTTP {}", resp.status().as_u16());
         let code = resp.status().as_u16();
         // 201=创建成功 405=已存在 301/302=已存在
         if !(resp.status().is_success() || code == 405 || code == 301 || code == 302) {
@@ -201,8 +208,10 @@ pub fn upload(cfg: &Config, remote_path: &str, bytes: Vec<u8>) -> Result<u64, St
         remote_path.trim_start_matches('/')
     );
     let len = bytes.len() as u64;
+    eprintln!("[webdav] PUT {url} ({} bytes)", len);
     let req = c.put(&url).body(bytes);
     let resp = auth(req, cfg).send().map_err(|e| format!("上传失败：{e}"))?;
+    eprintln!("[webdav] -> HTTP {}", resp.status().as_u16());
     if !resp.status().is_success() {
         return Err(format!("上传失败：HTTP {}", resp.status().as_u16()));
     }
