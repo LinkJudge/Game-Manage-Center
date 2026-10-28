@@ -73,6 +73,24 @@ CREATE TABLE name_sources (
 );
 
 CREATE INDEX idx_name_sources_status ON name_sources(status);
+
+-- Steam 官方中英文名（按 Steam AppID，独立于 PCGW 收录情况）
+CREATE TABLE IF NOT EXISTS steam_names (
+    steam_appid TEXT PRIMARY KEY,
+    name_zh     TEXT,
+    name_en     TEXT,
+    status      TEXT NOT NULL,
+    checked_at  TEXT NOT NULL
+);
+
+-- 库外游戏名字（Steam 热销榜里 PCGW 未收录的，没有 pcgw_id）
+CREATE TABLE IF NOT EXISTS extra_names (
+    steam_appid TEXT PRIMARY KEY,
+    name        TEXT,
+    status      TEXT NOT NULL,
+    hot_rank    INTEGER,
+    checked_at  TEXT NOT NULL
+);
 """
 
 INVALID = re.compile(r'[\\/:*?"<>|]')
@@ -129,14 +147,29 @@ def main() -> int:
     meta["schema"] = "gm.catalog/1"
     meta["migrated_at"] = datetime.now().isoformat(timespec="seconds")
 
-    # 名字来源表（若存在）
+    # 三张名字来源表（若存在则一并搬迁，避免增量补采丢失进度）
+    tables = {r[0] for r in src.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+
     sources = []
-    if "game_name_source" in {r[0] for r in src.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'")}:
+    if "game_name_source" in tables:
         sources = src.execute(
             "SELECT wiki_page_id, source, name, status, checked_at FROM game_name_source"
         ).fetchall()
         print(f"读取名字来源 {len(sources)} 条")
+
+    official = []
+    if "game_name_official" in tables:
+        official = src.execute(
+            "SELECT steam_appid, name_zh, name_en, status, checked_at FROM game_name_official"
+        ).fetchall()
+        print(f"读取 Steam 官方名 {len(official)} 条")
+
+    extra = []
+    if "game_name_extra" in tables:
+        extra = src.execute(
+            "SELECT steam_appid, name, status, hot_rank, checked_at FROM game_name_extra"
+        ).fetchall()
+        print(f"读取库外游戏名 {len(extra)} 条")
 
     if args.dry_run:
         changed = sum(1 for r in rows if make_install_dir(r[0]) != (r[2] or None))
@@ -183,6 +216,18 @@ def main() -> int:
             "VALUES(?,?,?,?,?)",
             sources,
         )
+    if official:
+        dst.executemany(
+            "INSERT OR REPLACE INTO steam_names(steam_appid, name_zh, name_en, status, checked_at) "
+            "VALUES(?,?,?,?,?)",
+            official,
+        )
+    if extra:
+        dst.executemany(
+            "INSERT OR REPLACE INTO extra_names(steam_appid, name, status, hot_rank, checked_at) "
+            "VALUES(?,?,?,?,?)",
+            extra,
+        )
     dst.commit()
 
     # 校验
@@ -195,10 +240,14 @@ def main() -> int:
         "SELECT COUNT(*) FROM games WHERE save_paths IS NOT NULL AND trim(save_paths)<>'' AND save_paths<>'{}'"
     ).fetchone()[0]
     n_src = dst.execute("SELECT COUNT(*) FROM name_sources").fetchone()[0]
+    n_off = dst.execute("SELECT COUNT(*) FROM steam_names").fetchone()[0]
+    n_ext = dst.execute("SELECT COUNT(*) FROM extra_names").fetchone()[0]
     print(f"  游戏行数      {n_new}")
     print(f"  有中文名      {n_zh}")
     print(f"  有存档路径    {n_paths}")
     print(f"  名字来源记录  {n_src}")
+    print(f"  Steam 官方名  {n_off}")
+    print(f"  库外游戏名    {n_ext}")
     print(f"  integrity     {dst.execute('PRAGMA integrity_check').fetchone()[0]}")
 
     dup = dst.execute(

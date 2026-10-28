@@ -6,11 +6,11 @@
 
 重建规则（戢翎拍板）：
   中文名 zh_CN
-    1. Steam 官方中文  game_name_official.status = 'ok'
-    2. 小黑盒中文      game_name_source.status  = 'named' (source='xiaoheihe')
+    1. Steam 官方中文  steam_names.status = 'ok'
+    2. 小黑盒中文      name_sources.status  = 'named' (source='xiaoheihe')
     3. 都没有          -> NULL（**清空上游作者人工整理的兜底中文名**）
   英文主名 title（PRIMARY KEY，只对差异项改）
-    1. Steam 官方英文  game_name_official.name_en（非空）
+    1. Steam 官方英文  steam_names.name_en（非空）
     2. 否则           保留现有 title（覆盖无 steam_id 的条目）
 
 用法：
@@ -44,18 +44,18 @@ def build_plan(conn: sqlite3.Connection, drop_legacy: bool = False) -> list[dict
     official = {
         str(r[0]): (r[1], r[2], r[3])
         for r in conn.execute(
-            "SELECT steam_appid, name_zh, name_en, status FROM game_name_official"
+            "SELECT steam_appid, name_zh, name_en, status FROM steam_names"
         )
     }
     xhh = {}
     for page_id, name, status in conn.execute(
-        "SELECT wiki_page_id, name, status FROM game_name_source WHERE source='xiaoheihe'"
+        "SELECT pcgw_id AS wiki_page_id, name, status FROM name_sources WHERE source='xiaoheihe'"
     ):
         xhh[str(page_id)] = (name, status)
 
     rows = []
     for title, page_id, steam_id, zh_cn in conn.execute(
-        "SELECT title, wiki_page_id, steam_id, zh_CN FROM games"
+        "SELECT name_en AS title, pcgw_id AS wiki_page_id, steam_appid AS steam_id, name_zh AS zh_CN FROM games"
     ):
         off = official.get(str(steam_id)) if steam_id is not None else None
         name_zh, name_en, off_status = off if off else (None, None, None)
@@ -202,7 +202,7 @@ def apply_changes(conn: sqlite3.Connection, rows: list[dict]) -> None:
     with conn:
         for r in todo:
             conn.execute(
-                "UPDATE games SET title = ?, zh_CN = ? WHERE wiki_page_id = ?",
+                "UPDATE games SET name_en = ?, name_zh = ? WHERE pcgw_id = ?",
                 (r["new_title"], r["new_zh"], r["wiki_page_id"]),
             )
     print(f"已写入 {len(todo)} 行。")

@@ -4,7 +4,7 @@
 优先级约定（戢翎 2026-10-28 定）：官方 > 小黑盒 > PCGamingWiki。
 本脚本只负责「官方」这一档，结果写入独立表，不动现有主名。
 
-写入 `game_name_official`：
+写入 `steam_names`：
   steam_appid   TEXT PRIMARY KEY
   name_zh       TEXT    -- l=schinese 返回的 name（可能仍是英文，见 status）
   name_en       TEXT    -- l=english 返回的 name
@@ -57,7 +57,7 @@ UA = (
 API = "https://store.steampowered.com/api/appdetails?appids={appid}&l={lang}&cc={cc}"
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS game_name_official (
+CREATE TABLE IF NOT EXISTS steam_names (
     steam_appid TEXT PRIMARY KEY,
     name_zh     TEXT,
     name_en     TEXT,
@@ -194,17 +194,17 @@ def main() -> int:
     conn.execute(SCHEMA)
     conn.commit()
 
-    done = {str(r[0]) for r in conn.execute("SELECT steam_appid FROM game_name_official")}
+    done = {str(r[0]) for r in conn.execute("SELECT steam_appid FROM steam_names")}
     if args.retry_errors:
         errors = {
             str(r[0])
-            for r in conn.execute("SELECT steam_appid FROM game_name_official WHERE status='error'")
+            for r in conn.execute("SELECT steam_appid FROM steam_names WHERE status='error'")
         }
         done -= errors
         print(f"重跑模式：{len(errors)} 个失败条目重新排队")
 
     rows = conn.execute(
-        "SELECT steam_id, title FROM games "
+        "SELECT steam_appid AS steam_id, name_en AS title FROM games "
         "WHERE steam_id IS NOT NULL AND trim(CAST(steam_id AS TEXT))<>''"
     ).fetchall()
 
@@ -248,7 +248,7 @@ def main() -> int:
             return
         conn.executemany(
             """
-            INSERT INTO game_name_official(steam_appid, name_zh, name_en, status, checked_at)
+            INSERT INTO steam_names(steam_appid, name_zh, name_en, status, checked_at)
             VALUES(?, ?, ?, ?, ?)
             ON CONFLICT(steam_appid) DO UPDATE SET
                 name_zh = excluded.name_zh,

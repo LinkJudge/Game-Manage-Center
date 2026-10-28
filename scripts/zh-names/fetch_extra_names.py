@@ -2,8 +2,8 @@
 """抓「热销榜里、但我们游戏库里没有」的那些游戏的中文名。
 
 这些 appid 在 `games` 表里没有对应行（PCGamingWiki 未收录，或是 DLC / 工具类），
-所以名字不能写进 `game_name_source`（那里靠 wiki_page_id 关联）。单独存一张表
-`game_name_extra`，为将来「给热门游戏补存档路径」做准备。
+所以名字不能写进 `name_sources`（那里靠 pcgw_id 关联）。单独存一张表
+`extra_names`，为将来「给热门游戏补存档路径」做准备。
 
 用法：
   python scripts/zh-names/fetch_extra_names.py --dry-run --limit 5    # 先看范围
@@ -32,7 +32,7 @@ DEFAULT_DB = ROOT / "src-tauri" / "resources" / "database.db"
 DEFAULT_HOT = ROOT.parent / ".workbuddy" / "steam-topsellers.json"
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS game_name_extra (
+CREATE TABLE IF NOT EXISTS extra_names (
     steam_appid TEXT PRIMARY KEY,
     name        TEXT,
     status      TEXT NOT NULL,      -- named / latin / no_name
@@ -84,14 +84,14 @@ def main() -> int:
 
     db_appids: set[str] = set()
     for (sid,) in conn.execute(
-        "SELECT steam_id FROM games WHERE steam_id IS NOT NULL AND trim(CAST(steam_id AS TEXT))<>''"
+        "SELECT steam_appid FROM games WHERE steam_appid IS NOT NULL AND trim(CAST(steam_appid AS TEXT))<>''"
     ):
         appid = core.steam_appid(sid)
         if appid:
             db_appids.add(appid)
 
     done: set[str] = {
-        str(r[0]) for r in conn.execute("SELECT steam_appid FROM game_name_extra")
+        str(r[0]) for r in conn.execute("SELECT steam_appid FROM extra_names")
     }
 
     targets = [
@@ -143,7 +143,7 @@ def main() -> int:
             return
         conn.executemany(
             """
-            INSERT INTO game_name_extra(steam_appid, name, status, hot_rank, checked_at)
+            INSERT INTO extra_names(steam_appid, name, status, hot_rank, checked_at)
             VALUES(?, ?, ?, ?, ?)
             ON CONFLICT(steam_appid) DO UPDATE SET
                 name = excluded.name,

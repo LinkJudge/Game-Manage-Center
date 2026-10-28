@@ -25,7 +25,7 @@
 - 默认只处理 zh_CN 为空、且带 Steam AppID 的记录
 - `--record-all`：所有 Steam 记录都检查，已有中文名也把小黑盒名称记入来源表
 - API 返回不含中文、或与英文名相同则跳过
-- 每个查询结果写入 `game_name_source`（含"无中文名"状态），后续不重复抓取
+- 每个查询结果写入 `name_sources`（含"无中文名"状态），后续不重复抓取
 - 数据库修改前自动备份到 .workbuddy/database-backups
 - 可反复运行：成功/无中文名的记录会从待处理集合消失
 """
@@ -316,8 +316,8 @@ def main() -> int:
     conn.row_factory = sqlite3.Row
     conn.execute(
         """
-        CREATE TABLE IF NOT EXISTS game_name_source (
-            wiki_page_id INTEGER NOT NULL,
+        CREATE TABLE IF NOT EXISTS name_sources (
+            pcgw_id    INTEGER NOT NULL,
             source TEXT NOT NULL,
             name TEXT,
             status TEXT NOT NULL,
@@ -327,17 +327,17 @@ def main() -> int:
         """
     )
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_game_name_source_name ON game_name_source(name)"
+        "CREATE INDEX IF NOT EXISTS idx_name_sources_name ON name_sources(name)"
     )
     conn.commit()
 
     extra_condition = "" if args.record_all else "AND (g.zh_CN IS NULL OR trim(g.zh_CN) = '')"
     rows = conn.execute(
         f"""
-        SELECT g.wiki_page_id, g.title, g.steam_id, g.zh_CN
+        SELECT g.pcgw_id AS wiki_page_id, g.name_en AS title, g.steam_appid AS steam_id, g.name_zh AS zh_CN
         FROM games g
-        LEFT JOIN game_name_source n
-          ON n.wiki_page_id = g.wiki_page_id AND n.source = 'xiaoheihe'
+        LEFT JOIN name_sources n
+          ON n.pcgw_id = g.pcgw_id AND n.source = 'xiaoheihe'
         WHERE g.steam_id IS NOT NULL
           AND trim(CAST(g.steam_id AS TEXT)) <> ''
           AND n.wiki_page_id IS NULL
@@ -417,14 +417,14 @@ def main() -> int:
             return
         if pending:
             conn.executemany(
-                "UPDATE games SET zh_CN = ? WHERE wiki_page_id = ? "
+                "UPDATE games SET name_zh = ? WHERE pcgw_id = ? "
                 "AND (zh_CN IS NULL OR trim(zh_CN) = '')",
                 pending,
             )
         if source_pending:
             conn.executemany(
                 """
-                INSERT INTO game_name_source(wiki_page_id, source, name, status, checked_at)
+                INSERT INTO name_sources(pcgw_id, source, name, status, checked_at)
                 VALUES(?, ?, ?, ?, ?)
                 ON CONFLICT(wiki_page_id, source) DO UPDATE SET
                     name = excluded.name,

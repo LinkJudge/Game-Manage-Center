@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""比对「主名」（games.zh_CN）与「小黑盒名」（game_name_source），产出交叉验证报告。
+"""比对「主名」（games.name_zh）与「小黑盒名」（name_sources），产出交叉验证报告。
 
 主名来源是 PCGamingWiki 等上游数据，小黑盒是独立来源；两边不一致时不能自动覆盖，
 先列出来人工判断（有些是官方译名差异，有些是民间叫法，有些是小黑盒数据不准）。
@@ -67,12 +67,12 @@ def main() -> int:
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         """
-        SELECT g.wiki_page_id, g.title, g.steam_id, g.zh_CN,
+        SELECT g.pcgw_id AS wiki_page_id, g.name_en AS title, g.steam_appid AS steam_id, g.name_zh AS zh_CN,
                n.name AS src_name, n.status AS src_status, n.checked_at
         FROM games g
-        LEFT JOIN game_name_source n
-          ON n.wiki_page_id = g.wiki_page_id AND n.source = 'xiaoheihe'
-        WHERE n.wiki_page_id IS NOT NULL
+        LEFT JOIN name_sources n
+          ON n.pcgw_id = g.pcgw_id AND n.source = 'xiaoheihe'
+        WHERE n.pcgw_id IS NOT NULL
         """
     ).fetchall()
     conn.close()
