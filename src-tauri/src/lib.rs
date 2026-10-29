@@ -489,6 +489,9 @@ fn resolve_install_meta(
 /// 回 `206 Partial Content` + `Content-Range: bytes 0-0/1885696`。
 /// 这是唯一能提前拿到总长的途径——HEAD 也不给 Content-Length。
 ///
+/// 注意它慢：要走完整条重定向链再被 Cloudflare 处理，实测有时十几秒，
+/// 所以调用方必须放到后台线程，不能串行阻塞下载。
+///
 /// ⚠️ 这个值**绝不能**用来切段或校验：实测它会比实际文件小（服务器把 .zip 当目录、
 /// 直接吐出里面的 exe，实测 1,029,292 vs 1,885,696）。拿它切段必然拼出损坏文件
 /// ——v0.4 就是栽在这里，后来连探测一起删掉，结果进度百分比也一起没了。
@@ -498,7 +501,7 @@ fn probe_total(url: &reqwest::Url, referer: &str) -> Option<u64> {
         .get(url.clone())
         .header("Referer", referer)
         .header("Range", "bytes=0-0")
-        .timeout(std::time::Duration::from_secs(8))
+        .timeout(std::time::Duration::from_secs(20))
         .send()
         .ok()?;
     // 不支持 Range 会回 200 并开始传整个文件，立刻丢掉连接，别等 body
@@ -521,7 +524,21 @@ fn parse_content_range_total(value: &str) -> Option<u64> {
     (total > 0).then_some(total)
 }
 
-/// 单流下载。`hinted_total` 是探测来的估算总长（可能不准，只用来算百分比）。
+/// 上报给前端的"分母"。
+///
+/// - `total == 0`：真的不知道总量，必须原样传 0，让前端画往返滑动条。
+///   ⚠️ 这里绝不能回退成 `done`——那会让百分比恒等于 100%，进度条一直满格
+///   （踩过：探测超时 → total=0 → `total.max(done)` → 永远 100%）。
+/// - `total > 0` 但已被下载量超过：探测值偏小（zip→exe 那种），分母跟着涨，避免 >100%。
+fn shown_total(total: u64, done: u64) -> u64 {
+    if total == 0 {
+        0
+    } else {
+        total.max(done)
+    }
+}
+
+/// 单流下载。`hint` 是后台探测线程回填的估算总长（可能还没到，也可能不准）。
 /// 返回实际收到的字节数。
 fn download_single_stream(
     client: &reqwest::blocking::Client,
@@ -530,9 +547,10 @@ fn download_single_stream(
     tmp_file: &std::path::Path,
     cancel: &AtomicBool,
     emit: &dyn Fn(&str, u64, u64),
-    hinted_total: u64,
+    hint: &std::sync::atomic::AtomicU64,
 ) -> Result<u64, String> {
     use std::io::{Read, Write};
+    use std::sync::atomic::Ordering;
     ensure_not_cancelled(cancel)?;
     let mut resp = client
         .get(url.clone())
@@ -547,9 +565,10 @@ fn download_single_stream(
             )
         })?;
     ensure_not_cancelled(cancel)?;
-    // 响应自己带 Content-Length 就用它（准确）；被 chunked 化就用探测值兜底
+    // 响应自己带 Content-Length 就用它（准确）；被 chunked 化就等探测线程回填。
+    // 0 表示"确实不知道总量"，前端据此画往返滑动条而不是百分比。
     let declared = resp.content_length().unwrap_or(0);
-    let total = if declared > 0 { declared } else { hinted_total };
+    let mut total = if declared > 0 { declared } else { hint.load(Ordering::Relaxed) };
     let mut file =
         std::fs::File::create(tmp_file).map_err(|e| format!("创建临时文件失败: {e}"))?;
     // 缓冲 8KB（原来 64KB）：网络慢时一次 read 要等好几秒才返回，
@@ -565,14 +584,20 @@ fn download_single_stream(
         }
         file.write_all(&buf[..n]).map_err(|e| format!("写入失败: {e}"))?;
         done += n as u64;
+        // 探测线程可能在下载中途才回来，拿到就补上
+        if total == 0 {
+            let h = hint.load(Ordering::Relaxed);
+            if h > 0 {
+                total = h;
+            }
+        }
         if last_emit.elapsed() >= std::time::Duration::from_millis(150) {
-            // 探测值偏小时（zip→exe 那种）分母要跟着涨，否则百分比越过 100 又不会回落
-            emit("download", done, total.max(done));
+            emit("download", done, shown_total(total, done));
             last_emit = std::time::Instant::now();
         }
     }
     file.flush().map_err(|e| e.to_string())?;
-    emit("download", done, total.max(done));
+    emit("download", done, shown_total(total, done));
     // 服务端声明的长度不可信：flingtrainer 页面标的 zip 大小是 1,027,604，
     // Range 探测回的 content-range 也写 1,029,292，实际完整 GET 却是 1,885,696
     // （服务器把 .zip 当目录、直接吐出里面的 exe）。所以只校验「不能少于声明值」，
@@ -769,11 +794,24 @@ fn download_and_install_blocking(
         // 且对 Range 的 end 位置处理不可靠），按探测值切段必然拼出损坏文件。
         //
         // 但「探测」本身要留着：它给的虽然是估算值，却是**唯一**能提前拿到总长的途径
-        // （这些响应是 chunked，Content-Length 和 HEAD 都拿不到）。只用来算百分比，
-        // 不参与切段、不参与校验。0.3 有进度条就是因为有这一步。
+        // （这些响应是 chunked，Content-Length 和 HEAD 都拿不到）。只用来算百分比。
+        //
+        // 探测放到后台线程里跑：它要走完整条重定向链（CF 慢时能到十几秒），
+        // 串行等待会白白拖慢每次下载；并行则下载立刻开始，总长一拿到就补上百分比。
         let url = reqwest::Url::parse(&meta.download_url)
             .map_err(|e| format!("下载地址无效: {e}"))?;
-        let hinted = probe_total(&url, &meta.page_url).unwrap_or(0);
+        let hint = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        {
+            let hint = std::sync::Arc::clone(&hint);
+            let probe_url = url.clone();
+            let probe_referer = meta.page_url.clone();
+            // 不 join：探测只是锦上添花，下载结束就该返回，别等它
+            std::thread::spawn(move || {
+                if let Some(t) = probe_total(&probe_url, &probe_referer) {
+                    hint.store(t, Ordering::Relaxed);
+                }
+            });
+        }
         ensure_not_cancelled(cancel)?;
         let total = download_single_stream(
             &client,
@@ -782,7 +820,7 @@ fn download_and_install_blocking(
             &tmp_file,
             cancel,
             &emit,
-            hinted,
+            &hint,
         )?;
 
         ensure_not_cancelled(cancel)?;
@@ -2314,5 +2352,19 @@ mod content_range_tests {
         assert_eq!(parse_content_range_total("bytes 0-0/*"), None);
         assert_eq!(parse_content_range_total("bytes 0-0/0"), None);
         assert_eq!(parse_content_range_total("garbage"), None);
+    }
+
+    /// 回归护栏：total 为 0 时必须原样传 0，不能回退成已下载量，
+    /// 否则前端算出的百分比恒等于 100%（进度条一直满格）。
+    #[test]
+    fn unknown_total_stays_zero() {
+        assert_eq!(super::shown_total(0, 92 * 1024), 0);
+        assert_eq!(super::shown_total(0, 0), 0);
+    }
+
+    #[test]
+    fn known_total_grows_when_hint_is_too_small() {
+        assert_eq!(super::shown_total(1_029_292, 8_192), 1_029_292);
+        assert_eq!(super::shown_total(1_029_292, 1_885_696), 1_885_696);
     }
 }
