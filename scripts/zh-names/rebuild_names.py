@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""按「官方 > 小黑盒 > 无」重建游戏主名与中文名 —— 默认只出报告，不落库。
+"""按「小黑盒 > 官方 > 无」重建游戏主名与中文名 —— 默认只出报告，不落库。
 
 ⚠️ 戢翎 2026-10-28 指令：数据工程先做，但**不落库、不进软件，生效留给 0.5 版本**。
 所以本脚本默认只读，写库必须显式 `--apply`，且会强制先备份。
 
 重建规则（戢翎拍板）：
   中文名 zh_CN
-    1. Steam 官方中文  steam_names.status = 'ok'
-    2. 小黑盒中文      name_sources.status  = 'named' (source='xiaoheihe')
+    1. 小黑盒中文      name_sources.status  = 'named' (source='xiaoheihe')
+    2. Steam 官方中文  steam_names.status = 'ok'
+       （戢翎 2026-10-29 定：小黑盒优先，官方名常带英文括注与书名号）
     3. 都没有          -> NULL（**清空上游作者人工整理的兜底中文名**）
   英文主名 title（PRIMARY KEY，只对差异项改）
     1. Steam 官方英文  steam_names.name_en（非空）
