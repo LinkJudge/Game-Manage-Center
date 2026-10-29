@@ -383,15 +383,57 @@ fn system_proxy() -> Option<String> {
     None
 }
 
-/// 生效的代理地址：环境变量 > Windows 系统代理 > 直连
+/// 代理地址的端口是否真的在监听。
+///
+/// 环境变量经常是被父进程顺手带进来的（早年的 shell、别的工具留下的），
+/// 端口早就没了。不探测就会一直走死代理——表现为下载慢到几 KB/s 或直接超时。
+/// 本机地址连不上会立刻 ECONNREFUSED，几乎不耗时；只有远端地址才会等满超时。
+fn proxy_reachable(addr: &str) -> bool {
+    use std::net::ToSocketAddrs;
+
+    let hostport = addr
+        .split("://")
+        .nth(1)
+        .unwrap_or(addr)
+        .split('/')
+        .next()
+        .unwrap_or("")
+        .trim();
+    if hostport.is_empty() {
+        return false;
+    }
+    let target = if hostport.contains(':') {
+        hostport.to_string()
+    } else {
+        format!("{hostport}:1080")
+    };
+    let Ok(addrs) = target.to_socket_addrs() else {
+        return false;
+    };
+    addrs
+        .take(2)
+        .any(|sa| std::net::TcpStream::connect_timeout(&sa, std::time::Duration::from_millis(1200)).is_ok())
+}
+
+/// 生效的代理地址：环境变量 > Windows 系统代理 > 直连（候选都先探活）
 fn effective_proxy() -> Option<String> {
-    std::env::var("HTTPS_PROXY")
+    let from_env = std::env::var("HTTPS_PROXY")
         .or_else(|_| std::env::var("https_proxy"))
         .or_else(|_| std::env::var("HTTP_PROXY"))
         .or_else(|_| std::env::var("http_proxy"))
         .ok()
-        .filter(|v| !v.trim().is_empty())
-        .or_else(system_proxy)
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    if let Some(p) = from_env {
+        if proxy_reachable(&p) {
+            return Some(p);
+        }
+        eprintln!("[net] 环境变量里的代理 {p} 连不通，改用系统代理");
+    }
+    match system_proxy() {
+        Some(p) if proxy_reachable(&p) => Some(p),
+        _ => None,
+    }
 }
 
 /// 下载客户端：站点要求 UA + Referer；代理走环境变量或 Windows 系统代理
@@ -2176,5 +2218,24 @@ mod proxy_tests {
         );
         assert_eq!(parse_proxy_server("  "), None);
         assert_eq!(parse_proxy_server("https="), None);
+    }
+}
+
+#[cfg(test)]
+mod proxy_alive_tests {
+    use super::proxy_reachable;
+
+    #[test]
+    fn rejects_closed_local_port_quickly() {
+        // 空闲端口：本机应当立刻 ECONNREFUSED
+        let started = std::time::Instant::now();
+        assert!(!proxy_reachable("http://127.0.0.1:1"));
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    }
+
+    #[test]
+    fn rejects_garbage_input() {
+        assert!(!proxy_reachable(""));
+        assert!(!proxy_reachable("://"));
     }
 }
