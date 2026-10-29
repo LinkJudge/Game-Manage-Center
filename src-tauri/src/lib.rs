@@ -319,7 +319,82 @@ fn list_installed_trainers(
     gm_core::trainers::install::scan_installed(&trainers_root(&state))
 }
 
-/// 下载客户端：站点要求 UA + Referer；代理走环境变量（Clash 场景）
+/// 读取 Windows「设置 → 网络和 Internet → 代理」里的系统代理。
+///
+/// reqwest **只认 HTTPS_PROXY / HTTP_PROXY 环境变量，从不读 Windows 的系统代理设置**。
+/// 从资源管理器/开始菜单启动的应用拿不到这两个变量，于是所有请求走直连——
+/// 实测 flingtrainer 的包直连 16–46 KB/s，走 Clash（127.0.0.1:7897）能到 150 KB/s 以上。
+/// 这里把系统代理补上，环境变量仍然优先（方便临时指定别的节点）。
+#[cfg(windows)]
+fn system_proxy() -> Option<String> {
+    use winreg::enums::{HKEY_CURRENT_USER, KEY_READ};
+    use winreg::RegKey;
+
+    let key = RegKey::predef(HKEY_CURRENT_USER)
+        .open_subkey_with_flags(
+            r"Software\Microsoft\Windows\CurrentVersion\Internet Settings",
+            KEY_READ,
+        )
+        .ok()?;
+    let enabled: u32 = key.get_value("ProxyEnable").unwrap_or(0);
+    if enabled == 0 {
+        return None;
+    }
+    let server: String = key.get_value("ProxyServer").ok()?;
+    parse_proxy_server(&server)
+}
+
+/// 解析注册表 `ProxyServer` 的两种写法："host:port" 或 "http=h:p;https=h:p;ftp=h:p"。
+///
+/// 只保留 http/https 两项，返回带 scheme 的地址；全是空值返回 None。
+fn parse_proxy_server(server: &str) -> Option<String> {
+    let (mut http, mut https) = (None, None);
+    for part in server.split(';') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        match part.split_once('=') {
+            Some((scheme, addr)) => match scheme.trim().to_ascii_lowercase().as_str() {
+                "https" => https = Some(addr.trim().to_string()),
+                "http" => http = Some(addr.trim().to_string()),
+                _ => {}
+            },
+            None => {
+                http = Some(part.to_string());
+                https = Some(part.to_string());
+            }
+        }
+    }
+    // 我们的请求全是 https，优先取 https 那一项
+    let addr = https.or(http)?;
+    if addr.is_empty() {
+        return None;
+    }
+    Some(if addr.contains("://") {
+        addr
+    } else {
+        format!("http://{addr}")
+    })
+}
+
+#[cfg(not(windows))]
+fn system_proxy() -> Option<String> {
+    None
+}
+
+/// 生效的代理地址：环境变量 > Windows 系统代理 > 直连
+fn effective_proxy() -> Option<String> {
+    std::env::var("HTTPS_PROXY")
+        .or_else(|_| std::env::var("https_proxy"))
+        .or_else(|_| std::env::var("HTTP_PROXY"))
+        .or_else(|_| std::env::var("http_proxy"))
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .or_else(system_proxy)
+}
+
+/// 下载客户端：站点要求 UA + Referer；代理走环境变量或 Windows 系统代理
 fn download_client() -> Result<reqwest::blocking::Client, String> {
     let mut builder = reqwest::blocking::Client::builder()
         .user_agent(
@@ -329,7 +404,7 @@ fn download_client() -> Result<reqwest::blocking::Client, String> {
         // blocking 版 reqwest 没有 read_timeout，只能用总超时兜底：
         // 连接被挂起时不至于永久卡住（正常 648KB@23KB/s 约 28 秒，20MB 也够用）。
         .timeout(std::time::Duration::from_secs(300));
-    if let Ok(proxy) = std::env::var("HTTPS_PROXY").or_else(|_| std::env::var("https_proxy")) {
+    if let Some(proxy) = effective_proxy() {
         builder = builder.proxy(reqwest::Proxy::all(&proxy).map_err(|e| format!("代理配置失败: {e}"))?);
     }
     builder.build().map_err(|e| e.to_string())
@@ -2071,4 +2146,35 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod proxy_tests {
+    use super::parse_proxy_server;
+
+    #[test]
+    fn parses_single_host_port() {
+        assert_eq!(
+            parse_proxy_server("127.0.0.1:7897").as_deref(),
+            Some("http://127.0.0.1:7897")
+        );
+    }
+
+    #[test]
+    fn parses_per_scheme_form_preferring_https() {
+        assert_eq!(
+            parse_proxy_server("http=127.0.0.1:7890;https=127.0.0.1:7891;ftp=1.2.3.4:21").as_deref(),
+            Some("http://127.0.0.1:7891")
+        );
+    }
+
+    #[test]
+    fn keeps_existing_scheme_and_rejects_empty() {
+        assert_eq!(
+            parse_proxy_server("socks5://127.0.0.1:1080").as_deref(),
+            Some("socks5://127.0.0.1:1080")
+        );
+        assert_eq!(parse_proxy_server("  "), None);
+        assert_eq!(parse_proxy_server("https="), None);
+    }
 }

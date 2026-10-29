@@ -43,6 +43,8 @@ urlencoding = "2"
 
 [target.'cfg(windows)'.dependencies]
 windows-icons = "0.4"
+# 读 HKCU 里的系统代理设置：reqwest 只认环境变量，不读 Windows 的代理配置
+winreg = "0.55"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
