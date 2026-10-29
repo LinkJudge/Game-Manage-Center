@@ -530,8 +530,11 @@ fn download_single_stream(
     }
     file.flush().map_err(|e| e.to_string())?;
     emit("download", done, total);
-    // 服务端给了 Content-Length 就必须下满；不足说明连接被提前掐断
-    if total > 0 && done != total {
+    // 服务端声明的长度不可信：flingtrainer 页面标的 zip 大小是 1,027,604，
+    // Range 探测回的 content-range 也写 1,029,292，实际完整 GET 却是 1,885,696
+    // （服务器把 .zip 当目录、直接吐出里面的 exe）。所以只校验「不能少于声明值」，
+    // 多了就按实测值接受——否则会把正常下载判成"不完整"。
+    if total > 0 && done < total {
         return Err(format!(
             "下载不完整：应收到 {total} 字节，实际只收到 {done} 字节，请重试"
         ));
@@ -733,10 +736,16 @@ fn download_and_install_blocking(
             download_single_stream(&client, &url, &meta.page_url, &tmp_file, cancel, &emit)?;
 
         ensure_not_cancelled(cancel)?;
-        // 安装（解压/落位/写 manifest）
+        // 安装（解压/落位/写 manifest）。用实测字节数覆盖目录里声称的大小：
+        // 目录值来自 flingtrainer 页面标的 zip 体积，实际下发的是 zip 里的 exe，
+        // 两者能差 80%，装完还显示旧值用户会以为下错了包。
+        let mut meta = meta.clone();
+        if total > 0 {
+            meta.size_bytes = Some(total);
+        }
         emit("extract", 0, total);
         let outcome =
-            gm_core::trainers::install::install_package(&tmp_file, meta, root, sevenz)?;
+            gm_core::trainers::install::install_package(&tmp_file, &meta, root, sevenz)?;
         emit("done", total, total);
 
         Ok(gm_core::trainers::install::InstalledTrainer {

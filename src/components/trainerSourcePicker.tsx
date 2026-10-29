@@ -78,7 +78,9 @@ export function TrainerSourcePicker({
                     <span>
                       {hit.optionsCount != null ? t("trainers.row.options", { count: hit.optionsCount }) : t("trainers.row.optionsUnknown")}
                     </span>
-                    <span>{formatBytes(hit.sizeBytes)}</span>
+                    <span>
+                      {hit.sizeBytes == null ? "—" : `≈ ${formatBytes(hit.sizeBytes)}`}
+                    </span>
                     {hit.updatedAt && <span>{t("dialogs.source.updatedAt", { date: hit.updatedAt })}</span>}
                   </div>
                 </div>

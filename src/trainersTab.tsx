@@ -158,7 +158,11 @@ function RowProgress({
   onCancel: () => void;
 }) {
   const { t: tr } = useI18n();
-  const pct = progress.total > 0 ? Math.round((progress.downloaded / progress.total) * 100) : 0;
+  const hasTotal = progress.total > 0;
+  // 服务端偶尔会把实际长度报小，百分比封顶 100，别出现 118% 这种
+  const pct = hasTotal
+    ? Math.min(100, Math.round((progress.downloaded / progress.total) * 100))
+    : 0;
   if (progress.stage === "cancelling") {
     return (
       <div className="flex items-center justify-end gap-1.5 text-xs text-muted-foreground">
@@ -186,8 +190,8 @@ function RowProgress({
       </Button>
     </ActionTooltip>
   );
-  // 连接/重定向阶段：还没有字节进度
-  if (progress.total === 0 && progress.downloaded === 0) {
+  // 连接/重定向阶段：还没有任何字节
+  if (!hasTotal && progress.downloaded === 0) {
     return (
       <div className="flex items-center justify-end gap-2 text-xs text-muted-foreground">
         <Loader2 className="size-3.5 animate-spin" /> {tr("trainers.progress.connecting")}
@@ -195,23 +199,14 @@ function RowProgress({
       </div>
     );
   }
-  // 服务端没给 Content-Length（分块传输）时算不出百分比。
-  // 此时不能画进度条——它会一直停在 0% 看着像卡死，改成转圈 + 已下载量。
-  if (progress.total === 0) {
-    return (
-      <div className="flex items-center justify-end gap-2 text-xs text-muted-foreground">
-        <Loader2 className="size-3.5 animate-spin" />
-        {formatBytes(progress.downloaded)}
-        {cancelButton}
-      </div>
-    );
-  }
+  // 统一的下载态：有总量 → 百分比进度条；没总量（分块传输）→ 往返滑动条 + 已下载量。
+  // 两种必须是同一套版式，否则列表里一半有进度条一半只有数字，看着像坏了。
   return (
     <div className="ml-auto flex items-center justify-end gap-2">
       <div className="w-32 text-right">
-        <Progress value={pct} className="h-1.5" />
-        <div className="mt-0.5 text-[10px] text-muted-foreground">
-          {pct}% · {formatBytes(progress.downloaded)}
+        <Progress value={pct} indeterminate={!hasTotal} className="h-1.5" />
+        <div className="mt-0.5 text-[10px] tabular-nums text-muted-foreground">
+          {hasTotal ? `${pct}% · ${formatBytes(progress.downloaded)}` : formatBytes(progress.downloaded)}
         </div>
       </div>
       {cancelButton}
@@ -1118,6 +1113,15 @@ export function TrainersTab() {
                   row.hit?.optionsCount ?? manifest?.optionsCount ?? null;
                 const gameVersion = row.hit?.gameVersion ?? manifest?.gameVersion ?? null;
                 const sizeBytes = row.hit?.sizeBytes ?? manifest?.sizeBytes ?? null;
+                // 目录里的大小是 flingtrainer 页面标的 zip 体积，实际下发的是 zip 里的 exe
+                // （服务器把 .zip 当目录），能差到 80%。所以只有已安装包（manifest 里存的是
+                // 下载实测字节数）能直接显示，其余一律标估算值。
+                const sizeLabel =
+                  sizeBytes == null
+                    ? "—"
+                    : row.hit == null
+                      ? formatBytes(sizeBytes)
+                      : `≈ ${formatBytes(sizeBytes)}`;
                 const updatedAt = row.hit?.updatedAt ?? manifest?.dateAdded ?? null;
                 const isOrphan = row.installedOf
                   ? orphanFolders.has(row.installedOf.folder)
@@ -1213,7 +1217,7 @@ export function TrainersTab() {
                         {optionsCount != null ? tr("trainers.row.options", { count: optionsCount }) : tr("trainers.row.optionsUnknown")}
                       </div>
                       <div className="mt-0.5 text-[10px] tabular-nums text-muted-foreground/65">
-                        {gameVersion ?? tr("trainers.row.versionUnknown")} · {formatBytes(sizeBytes)}
+                        {gameVersion ?? tr("trainers.row.versionUnknown")} · {sizeLabel}
                       </div>
                     </TableCell>
                     <TableCell>
