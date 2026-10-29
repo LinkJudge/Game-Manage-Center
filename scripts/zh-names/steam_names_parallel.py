@@ -127,7 +127,11 @@ def fetch(appid: str, retries: int = 2, timeout: int = 12):
         if not name:
             return "missing", None, None
         if CJK.search(name):
-            return "ok", name, name
+            # 官方有中文：name_zh 记中文，name_en 必须留空。
+            # 请求用的是 l=schinese，拿不到英文名；早先这里返回 (name, name)
+            # 把中文同时写进了 name_en，导致下游 rebuild_names 把中文当英文主名，
+            # 一次落库污染了 873 条 games.name_en。宁可留空也不要塞错值。
+            return "ok", name, None
         return "en_only", None, name
 
     if last_error is not None:

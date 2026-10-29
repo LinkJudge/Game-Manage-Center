@@ -28,12 +28,15 @@ from __future__ import annotations
 
 import argparse
 import csv
+import re
 import shutil
 import sqlite3
 import sys
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
+
+CJK = re.compile(r"[\u3400-\u9fff]")
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DB = ROOT / "src-tauri" / "resources" / "database.db"
@@ -80,7 +83,16 @@ def build_plan(conn: sqlite3.Connection, drop_legacy: bool = False) -> list[dict
             new_zh, zh_src = None, "none"
 
         # 英文名：官方优先，保留原值兜底
-        new_title = (name_en or "").strip() or title
+        #
+        # ⚠️ steam_names.name_en 里可能存的是中文：appdetails 用 l=schinese 请求，
+        # 官方有中文时返回的就是中文名，采集端把同一个值同时写进了 name_zh 和 name_en
+        # （实测 1,975 条 name_en == name_zh）。直接拿来当英文主名会把中文写进 name_en，
+        # 曾经一次落库污染了 873 条。
+        # 这里强制过滤：含汉字的一律不算英文名，保留现有 title。
+        en_name = (name_en or "").strip()
+        if en_name and CJK.search(en_name):
+            en_name = ""
+        new_title = en_name or title
         title_src = "official" if (name_en or "").strip() and new_title != title else (
             "official(same)" if (name_en or "").strip() else "keep"
         )
