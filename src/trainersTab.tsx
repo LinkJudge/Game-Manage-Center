@@ -1368,7 +1368,7 @@ export function TrainersTab() {
 
       {/* 删除确认 */}
       <AlertDialog open={pendingDelete != null} onOpenChange={(open) => !open && setPendingDelete(null)}>
-        <AlertDialogContent className="sm:max-w-lg">
+        <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
               {tr("trainers.delete.title", {
@@ -1385,9 +1385,6 @@ export function TrainersTab() {
               {tr("trainers.delete.desc")}
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <div className="break-all rounded-md bg-muted px-3 py-2 font-mono text-xs leading-relaxed text-muted-foreground">
-            {pendingDelete?.folder}
-          </div>
           <AlertDialogFooter>
             <AlertDialogCancel>{tr("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction

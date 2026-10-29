@@ -94,9 +94,9 @@ export const trainersZh: Record<string, string> = {
   "trainers.bulk.clear": "取消选择",
 
   "trainers.delete.title": "删除 {name} 的修改器？",
-  "trainers.delete.desc": "将删除该修改器的包目录及其全部文件，不影响游戏本体的任何数据。",
+  "trainers.delete.desc": "删除后无法恢复。",
   "trainers.delete.batchTitle": "删除 {count} 个已安装的修改器？",
-  "trainers.delete.batchDesc": "将删除选中修改器的包目录及全部文件，不影响游戏本体的任何数据。",
+  "trainers.delete.batchDesc": "删除后无法恢复。",
   "trainers.delete.confirm": "删除",
   "trainers.filter.sourceAll": "全部来源",
   "trainers.filter.sourceTip": "按修改器来源筛选（再点一次取消）",
@@ -201,11 +201,9 @@ export const trainersEn: Record<string, string> = {
   "trainers.bulk.clear": "Clear selection",
 
   "trainers.delete.title": "Delete the trainer for {name}?",
-  "trainers.delete.desc":
-    "This removes the trainer package folder and all its files. Game data is never touched.",
+  "trainers.delete.desc": "This cannot be undone.",
   "trainers.delete.batchTitle": "Delete {count} installed trainers?",
-  "trainers.delete.batchDesc":
-    "This removes the package folders of the selected trainers and all their files. Game data is never touched.",
+  "trainers.delete.batchDesc": "This cannot be undone.",
   "trainers.delete.confirm": "Delete",
   "trainers.filter.sourceAll": "All sources",
   "trainers.filter.sourceTip": "Filter by trainer source (click again to clear)",

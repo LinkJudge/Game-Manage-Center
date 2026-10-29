@@ -221,7 +221,10 @@ export function BackupHistoryDialog({
           <AlertDialogHeader>
             <AlertDialogTitle>{t("dialogs.history.deleteTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
-              {game?.title} · {deleteAsk ? formatBackupDate(deleteAsk) : ""}，{t("dialogs.history.deleteDesc", { title: gameName, date: deleteAsk ? formatBackupDate(deleteAsk) : "" })}
+              {t("dialogs.history.deleteDesc", {
+                title: gameName,
+                date: deleteAsk ? formatBackupDate(deleteAsk) : "",
+              })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
