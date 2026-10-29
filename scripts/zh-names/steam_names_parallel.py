@@ -139,12 +139,16 @@ def main() -> int:
     global GAP
     parser = argparse.ArgumentParser(description="Steam 官方中文名并发采集")
     parser.add_argument("--db", type=Path, default=DEFAULT_DB)
-    parser.add_argument("--workers", type=int, default=4, help="并发线程数（默认 4）")
-    parser.add_argument("--gap", type=float, default=0.22, help="全局最小请求间隔秒（默认 0.22）")
+    parser.add_argument("--workers", type=int, default=1,
+                        help="并发线程数（默认 1；Steam 实测约 1 条/秒，再快就 429）")
+    parser.add_argument("--gap", type=float, default=0.9, help="全局最小请求间隔秒（默认 0.9）")
     parser.add_argument("--limit", type=int, default=0, help="本轮最多处理多少（0=全部）")
     parser.add_argument("--probe", action="store_true", help="探活：20 条、2 线程")
     parser.add_argument("--retry-errors", action="store_true", help="把上轮 error 的重新排队")
     parser.add_argument("--proxy", default="", help="代理地址，如 http://127.0.0.1:7897；留空=直连")
+    parser.add_argument("--hot", type=Path, default=None,
+                        help="优先榜单（steam-priority.json）：只采榜上有的游戏，按名次排序")
+    parser.add_argument("--hot-top", type=int, default=0, help="只取榜单前 N 名（0=榜上全部）")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -178,6 +182,22 @@ def main() -> int:
             continue
         seen.add(digits)
         targets.append(digits)
+
+    # 榜单优先：Steam 实测约 1 条/秒（再快就 429），4.6 万条要 12 小时。
+    # 榜上游戏才是玩家会搜的，先采这批；榜外的冷门留到以后慢慢跑。
+    if args.hot:
+        if not args.hot.exists():
+            print(f"[错误] 找不到榜单文件：{args.hot}")
+            return 1
+        hot_list = json.loads(args.hot.read_text(encoding="utf-8"))
+        rank = {str(item["appid"]): int(item.get("rank") or 10**9) for item in hot_list}
+        before = len(targets)
+        targets = [a for a in targets if a in rank]
+        targets.sort(key=lambda a: rank[a])
+        if args.hot_top > 0:
+            targets = targets[: args.hot_top]
+        print(f"榜单过滤：榜上 {len(rank)} 个 AppID，命中待采 {len(targets)} 条"
+              f"（原待采 {before} 条），按名次处理", flush=True)
 
     total_pending = len(targets)
     if args.limit > 0:

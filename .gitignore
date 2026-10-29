@@ -43,3 +43,8 @@ scripts/trainers/.cache/
 # Python 缓存
 __pycache__/
 *.pyc
+
+# PCGamingWiki 采集管道（自建，与参考项目无关）
+scripts/pcgw/node_modules
+scripts/pcgw/database/
+scripts/pcgw/.cache/

@@ -1,0 +1,9 @@
+{
+  "name": "gm-pcgw-pipeline",
+  "private": true,
+  "type": "commonjs",
+  "description": "PCGamingWiki 采集管道（自建，与参考项目无关）。这里显式声明 commonjs：上层 Game-Manage-Center/package.json 是 ESM，不加这一行 .js 会被当模块处理，require 直接报错。",
+  "dependencies": {
+    "sqlite3": "^6.0.1"
+  }
+}
