@@ -59,6 +59,8 @@ def main() -> int:
     parser.add_argument("--batches", type=int, default=4, help="跑几批（默认 4）")
     parser.add_argument("--budget", type=int, default=300, help="每批请求数（默认 300）")
     parser.add_argument("--gap", type=int, default=600, help="批间冷却秒数（默认 600）")
+    parser.add_argument("--hot", default="", help="优先榜单文件（steam-priority.json），按榜上名次优先采")
+    parser.add_argument("--hot-top", type=int, default=0, help="只采榜单前 N 名（0=榜单内全部待采）")
     parser.add_argument("--probe", action="store_true", help="探活模式：1 批 × 20 请求")
     args = parser.parse_args()
 
@@ -94,6 +96,10 @@ def main() -> int:
             "--budget", str(budget),
             "--limit", str(budget),
         ]
+        if args.hot:
+            cmd += ["--hot", str((ROOT / args.hot).resolve() if not Path(args.hot).is_absolute() else args.hot)]
+            if args.hot_top > 0:
+                cmd += ["--hot-top", str(args.hot_top)]
         process = subprocess.run(
             cmd, cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8", errors="replace"
         )
