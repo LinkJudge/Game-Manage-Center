@@ -54,11 +54,16 @@ pub struct FillSummary {
 }
 
 fn client() -> Result<reqwest::blocking::Client, String> {
-    reqwest::blocking::Client::builder()
+    let mut builder = reqwest::blocking::Client::builder()
         .user_agent("GameManageCenter/0.4")
-        .timeout(Duration::from_secs(20))
-        .build()
-        .map_err(|e| e.to_string())
+        .timeout(Duration::from_secs(20));
+    // 图片走 cdn2.steamgriddb.com，国内直连会直接超时（实测 20 秒无响应），
+    // 必须复用下载客户端的代理判定（环境变量 / Windows 系统代理）。
+    if let Some(proxy) = crate::effective_proxy() {
+        builder = builder
+            .proxy(reqwest::Proxy::all(&proxy).map_err(|e| format!("代理配置失败: {e}"))?);
+    }
+    builder.build().map_err(|e| e.to_string())
 }
 
 fn get_json(
