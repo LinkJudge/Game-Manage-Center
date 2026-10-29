@@ -322,7 +322,7 @@ def main() -> int:
             name TEXT,
             status TEXT NOT NULL,
             checked_at TEXT NOT NULL,
-            PRIMARY KEY (wiki_page_id, source)
+            PRIMARY KEY (pcgw_id, source)
         )
         """
     )
@@ -331,18 +331,18 @@ def main() -> int:
     )
     conn.commit()
 
-    extra_condition = "" if args.record_all else "AND (g.zh_CN IS NULL OR trim(g.zh_CN) = '')"
+    extra_condition = "" if args.record_all else "AND (g.name_zh IS NULL OR trim(g.name_zh) = '')"
     rows = conn.execute(
         f"""
         SELECT g.pcgw_id AS wiki_page_id, g.name_en AS title, g.steam_appid AS steam_id, g.name_zh AS zh_CN
         FROM games g
         LEFT JOIN name_sources n
           ON n.pcgw_id = g.pcgw_id AND n.source = 'xiaoheihe'
-        WHERE g.steam_id IS NOT NULL
-          AND trim(CAST(g.steam_id AS TEXT)) <> ''
-          AND n.wiki_page_id IS NULL
+        WHERE g.steam_appid IS NOT NULL
+          AND trim(CAST(g.steam_appid AS TEXT)) <> ''
+          AND n.pcgw_id IS NULL
           {extra_condition}
-        ORDER BY g.title COLLATE NOCASE
+        ORDER BY g.name_en COLLATE NOCASE
         """
     ).fetchall()
 
@@ -418,7 +418,7 @@ def main() -> int:
         if pending:
             conn.executemany(
                 "UPDATE games SET name_zh = ? WHERE pcgw_id = ? "
-                "AND (zh_CN IS NULL OR trim(zh_CN) = '')",
+                "AND (name_zh IS NULL OR trim(name_zh) = '')",
                 pending,
             )
         if source_pending:
@@ -426,7 +426,7 @@ def main() -> int:
                 """
                 INSERT INTO name_sources(pcgw_id, source, name, status, checked_at)
                 VALUES(?, ?, ?, ?, ?)
-                ON CONFLICT(wiki_page_id, source) DO UPDATE SET
+                ON CONFLICT(pcgw_id, source) DO UPDATE SET
                     name = excluded.name,
                     status = excluded.status,
                     checked_at = excluded.checked_at
