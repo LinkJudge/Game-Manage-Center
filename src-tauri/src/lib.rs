@@ -420,8 +420,12 @@ fn download_single_stream(
     Ok(done)
 }
 
-/// 多连接分段并行下载：每段独立连接（各付一次连接/重定向开销），单连接被
-/// CDN 限速时总速度接近分段数倍数。任一分段失败即整体失败（staging 由外层清理）
+/// 多连接分段并行下载。
+///
+/// **当前未启用**：flingtrainer 的 CDN 元数据不可靠（Content-Range 与实际
+/// Content-Length 差 70%），且对 Range 的 end 位置处理不正确，按段拼接必然
+/// 得到损坏文件。保留实现以备服务器行为改善后再启用。
+#[allow(dead_code)]
 fn download_ranged_parallel(
     final_url: &reqwest::Url,
     referer: &str,
@@ -595,45 +599,19 @@ fn download_and_install_blocking(
         let tmp_file = tmp_dir.join("package.bin");
         ensure_not_cancelled(cancel)?;
 
-        // 探测：Range 请求随重定向拿到最终地址与总大小（CDN 支持 206 分段）
-        let probe = client
-            .get(&meta.download_url)
-            .header("Referer", &meta.page_url)
-            .header("Range", "bytes=0-0")
-            .send()
-            .map_err(|e| format!("下载请求失败: {e}"))?;
-        ensure_not_cancelled(cancel)?;
-        let ranged_total: Option<u64> = if probe.status() == reqwest::StatusCode::PARTIAL_CONTENT {
-            probe
-                .headers()
-                .get(reqwest::header::CONTENT_RANGE)
-                .and_then(|v| v.to_str().ok())
-                .and_then(|s| s.rsplit('/').next())
-                .and_then(|s| s.trim().parse::<u64>().ok())
-        } else {
-            None
-        };
-        let final_url = probe.url().clone();
-        drop(probe);
-
-        let total = match ranged_total {
-            // 支持分段且足够大：多连接并行拉取（单连接被限速时显著提速）
-            Some(t) if t >= 256 * 1024 => {
-                let segments = if t >= 512 * 1024 { 4u64 } else { 2u64 };
-                download_ranged_parallel(
-                    &final_url,
-                    &meta.page_url,
-                    &tmp_file,
-                    t,
-                    segments,
-                    cancel,
-                    &emit,
-                )?;
-                t
-            }
-            // 其余回退单流下载
-            _ => download_single_stream(&client, &final_url, &meta.page_url, &tmp_file, cancel, &emit)?,
-        };
+        // ⚠️ 不再做 Range 探测与并行分段。
+        //
+        // 实测 flingtrainer 的 CDN 元数据不一致：
+        //   HEAD/探测返回 content-range: bytes 0-0/948445
+        //   实际单流下载 Content-Length 是 1,635,328
+        // 按 948,445 切 4 段，每段"应下载 237,111"却收到远超该值的数据
+        // （服务器对 Range 的 end 位置处理也不可靠），拼接必然错位。
+        //
+        // 单流用 Content-Length，准确；代理下 1.6MB 只需 4 秒，不需要并行提速。
+        let url = reqwest::Url::parse(&meta.download_url)
+            .map_err(|e| format!("下载地址无效: {e}"))?;
+        let total =
+            download_single_stream(&client, &url, &meta.page_url, &tmp_file, cancel, &emit)?;
 
         ensure_not_cancelled(cancel)?;
         // 安装（解压/落位/写 manifest）
