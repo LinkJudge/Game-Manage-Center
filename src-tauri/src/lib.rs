@@ -325,7 +325,10 @@ fn download_client() -> Result<reqwest::blocking::Client, String> {
         .user_agent(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
         )
-        .connect_timeout(std::time::Duration::from_secs(15));
+        .connect_timeout(std::time::Duration::from_secs(15))
+        // blocking 版 reqwest 没有 read_timeout，只能用总超时兜底：
+        // 连接被挂起时不至于永久卡住（正常 648KB@23KB/s 约 28 秒，20MB 也够用）。
+        .timeout(std::time::Duration::from_secs(300));
     if let Ok(proxy) = std::env::var("HTTPS_PROXY").or_else(|_| std::env::var("https_proxy")) {
         builder = builder.proxy(reqwest::Proxy::all(&proxy).map_err(|e| format!("代理配置失败: {e}"))?);
     }
@@ -502,7 +505,11 @@ fn download_ranged_parallel(
                 }
             });
         }
-        // 进度泵：分段线程各自跑，这里按 150ms 节拍发聚合进度
+        // 进度泵：分段线程各自跑，这里按 150ms 节拍发聚合进度。
+        // 同时做停滞检测——某段连接被挂起时它既不报错也不返回数据，
+        // 表现为进度卡死在 100% 不动，必须主动判失败。
+        let mut last_done = 0u64;
+        let mut stalled_ticks = 0u32;
         loop {
             std::thread::sleep(std::time::Duration::from_millis(150));
             if cancel.load(Ordering::Relaxed) {
@@ -514,8 +521,28 @@ fn download_ranged_parallel(
             }
             let done = progress.load(Ordering::Relaxed);
             emit("download", done.min(total), total);
-            if done >= total || first_err.lock().unwrap().is_some() {
+            if first_err.lock().unwrap().is_some() {
                 break;
+            }
+            if done >= total {
+                break;
+            }
+            // 200 × 150ms = 30 秒
+            if done == last_done {
+                stalled_ticks += 1;
+                if stalled_ticks >= 200 {
+                    cancel.store(true, Ordering::Relaxed);
+                    let mut slot = first_err.lock().unwrap();
+                    if slot.is_none() {
+                        *slot = Some(format!(
+                            "下载停滞超过 30 秒（已收到 {done}/{total} 字节），请重试"
+                        ));
+                    }
+                    break;
+                }
+            } else {
+                stalled_ticks = 0;
+                last_done = done;
             }
         }
     });
