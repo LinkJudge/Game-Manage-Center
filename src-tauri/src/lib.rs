@@ -408,7 +408,13 @@ fn download_single_stream(
     }
     file.flush().map_err(|e| e.to_string())?;
     emit("download", done, total);
-    Ok(total.max(done))
+    // 服务端给了 Content-Length 就必须下满；不足说明连接被提前掐断
+    if total > 0 && done != total {
+        return Err(format!(
+            "下载不完整：应收到 {total} 字节，实际只收到 {done} 字节，请重试"
+        ));
+    }
+    Ok(done)
 }
 
 /// 多连接分段并行下载：每段独立连接（各付一次连接/重定向开销），单连接被
@@ -463,6 +469,8 @@ fn download_ranged_parallel(
                         .open(tmp_file)
                         .map_err(|e| format!("分段 {i} 打开临时文件失败: {e}"))?;
                     file.seek(SeekFrom::Start(start)).map_err(|e| e.to_string())?;
+                    let expected = end - start + 1;
+                    let mut written = 0u64;
                     let mut buf = [0u8; 64 * 1024];
                     loop {
                         ensure_not_cancelled(cancel)?;
@@ -473,7 +481,16 @@ fn download_ranged_parallel(
                         }
                         file.write_all(&buf[..n])
                             .map_err(|e| format!("分段 {i} 写入失败: {e}"))?;
+                        written += n as u64;
                         progress.fetch_add(n as u64, Ordering::Relaxed);
+                    }
+                    // ⚠️ 必须校验：连接被代理/CDN 提前掐断时 read 会直接返回 0，
+                    // 若不比对字节数就会把「前半段 + 一大片零」当成完整文件。
+                    // 文件是 set_len(total) 预分配的，事后看大小也发现不了。
+                    if written != expected {
+                        return Err(format!(
+                            "分段 {i} 数据不完整：应下载 {expected} 字节，实际只收到 {written} 字节"
+                        ));
                     }
                     Ok(())
                 };
