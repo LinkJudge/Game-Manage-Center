@@ -456,6 +456,13 @@ export function TrainersTab() {
       .then((t) => {
         toast.success(tr("trainers.toast.installed"), { description: t.manifest.gameName });
         refreshInstalled();
+        // 正常收尾也清一次：done 事件万一丢了（监听晚绑定/窗口切换），
+        // 行上会留一条永远走不完的进度条
+        setProgress((prev) => {
+          const next = { ...prev };
+          delete next[hit.id];
+          return next;
+        });
       })
       .catch((e) => {
         if (String(e).includes(DOWNLOAD_CANCELLED)) {
@@ -520,7 +527,8 @@ export function TrainersTab() {
     }
   };
 
-  const startUpdate = (u: TrainerUpdateInfo) => {    setProgress((prev) => ({
+  const startUpdate = (u: TrainerUpdateInfo) => {
+    setProgress((prev) => ({
       ...prev,
       [u.trainerId]: { trainerId: u.trainerId, stage: "download", downloaded: 0, total: 0 },
     }));
@@ -534,6 +542,11 @@ export function TrainersTab() {
           description: gameName(u.gameName, u.zhName, lang),
         });
         refreshInstalled();
+        setProgress((prev) => {
+          const next = { ...prev };
+          delete next[u.trainerId];
+          return next;
+        });
       })
       .catch((e) => {
         if (String(e).includes(DOWNLOAD_CANCELLED)) {

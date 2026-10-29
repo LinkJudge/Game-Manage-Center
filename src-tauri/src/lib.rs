@@ -26,6 +26,23 @@ pub struct AppState {
     pub trainer_downloads: Mutex<HashMap<String, Arc<AtomicBool>>>,
 }
 
+/// 取锁，中毒时也照常拿到内部数据。
+///
+/// 只要有一个命令在持锁期间 panic，这把锁就被标记为中毒，之后每次
+/// `lock().unwrap()` 都会再 panic —— 表现是"点什么都没反应"，只能重启。
+/// 这里直接取回内部值，让一次意外只影响那一次操作。
+fn lock_or_recover<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn read_or_recover<T>(l: &std::sync::RwLock<T>) -> std::sync::RwLockReadGuard<'_, T> {
+    l.read().unwrap_or_else(|e| e.into_inner())
+}
+
+fn write_or_recover<T>(l: &std::sync::RwLock<T>) -> std::sync::RwLockWriteGuard<'_, T> {
+    l.write().unwrap_or_else(|e| e.into_inner())
+}
+
 impl AppState {
     fn backups_root(&self) -> PathBuf {
         let root = self
@@ -41,16 +58,16 @@ impl AppState {
     }
 
     fn max_backups(&self) -> u32 {
-        self.settings.lock().unwrap().max_backups
+        lock_or_recover(&self.settings).max_backups
     }
 
     fn compress(&self) -> bool {
-        self.settings.lock().unwrap().compress_backups
+        lock_or_recover(&self.settings).compress_backups
     }
 
     fn persist(&self, settings: &AppSettings) -> Result<(), String> {
         settings.save(&self.settings_path)?;
-        *self.settings.lock().unwrap() = settings.clone();
+        *lock_or_recover(&self.settings) = settings.clone();
         Ok(())
     }
 }
@@ -229,7 +246,7 @@ fn search_trainers(
         .unwrap()
         .search(
             &query,
-            &state.trainer_zh.read().unwrap(),
+            &read_or_recover(&state.trainer_zh),
             limit.unwrap_or(50).clamp(1, 200) as usize,
         )
 }
@@ -254,7 +271,7 @@ fn match_trainers(
         .trainers
         .read()
         .unwrap()
-        .match_games(&state.trainer_zh.read().unwrap(), &pairs)
+        .match_games(&read_or_recover(&state.trainer_zh), &pairs)
 }
 
 // ======================================================================
@@ -458,7 +475,7 @@ fn resolve_install_meta(
     trainer_id: &str,
     download_url: &str,
 ) -> Result<gm_core::trainers::install::TrainerInstallMeta, String> {
-    let registry = state.trainers.read().unwrap();
+    let registry = read_or_recover(&state.trainers);
     let Some((_source_id, entry)) = registry.find_entry(trainer_id) else {
         return Err(format!("目录里找不到修改器：{trainer_id}"));
     };
@@ -567,144 +584,6 @@ fn download_single_stream(
     Ok(done)
 }
 
-/// 多连接分段并行下载。
-///
-/// **当前未启用**：flingtrainer 的 CDN 元数据不可靠（Content-Range 与实际
-/// Content-Length 差 70%），且对 Range 的 end 位置处理不正确，按段拼接必然
-/// 得到损坏文件。保留实现以备服务器行为改善后再启用。
-#[allow(dead_code)]
-fn download_ranged_parallel(
-    final_url: &reqwest::Url,
-    referer: &str,
-    tmp_file: &std::path::Path,
-    total: u64,
-    segments: u64,
-    cancel: &AtomicBool,
-    emit: &dyn Fn(&str, u64, u64),
-) -> Result<(), String> {
-    use std::io::{Read, Seek, SeekFrom, Write};
-    use std::sync::atomic::AtomicU64;
-    use std::sync::{Arc, Mutex};
-
-    ensure_not_cancelled(cancel)?;
-    // 预分配目标文件，各分段按偏移写入
-    {
-        let f = std::fs::File::create(tmp_file).map_err(|e| format!("创建临时文件失败: {e}"))?;
-        f.set_len(total).map_err(|e| format!("预分配失败: {e}"))?;
-    }
-    let progress = Arc::new(AtomicU64::new(0));
-    let first_err: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-
-    let seg_size = total.div_ceil(segments);
-    std::thread::scope(|s| {
-        for i in 0..segments {
-            let start = i * seg_size;
-            if start >= total {
-                break;
-            }
-            let end = (start + seg_size - 1).min(total - 1);
-            let progress = Arc::clone(&progress);
-            let first_err = Arc::clone(&first_err);
-            s.spawn(move || {
-                let run = || -> Result<(), String> {
-                    ensure_not_cancelled(cancel)?;
-                    let client = download_client()?;
-                    let mut resp = client
-                        .get(final_url.clone())
-                        .header("Referer", referer)
-                        .header("Range", format!("bytes={start}-{end}"))
-                        .send()
-                        .map_err(|e| format!("分段 {i} 请求失败: {e}"))?;
-                    if resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
-                        return Err(format!("分段 {i} 被拒绝（{}）", resp.status()));
-                    }
-                    let mut file = std::fs::OpenOptions::new()
-                        .write(true)
-                        .open(tmp_file)
-                        .map_err(|e| format!("分段 {i} 打开临时文件失败: {e}"))?;
-                    file.seek(SeekFrom::Start(start)).map_err(|e| e.to_string())?;
-                    let expected = end - start + 1;
-                    let mut written = 0u64;
-                    let mut buf = [0u8; 64 * 1024];
-                    loop {
-                        ensure_not_cancelled(cancel)?;
-                        let n =
-                            resp.read(&mut buf).map_err(|e| format!("分段 {i} 下载中断: {e}"))?;
-                        if n == 0 {
-                            break;
-                        }
-                        file.write_all(&buf[..n])
-                            .map_err(|e| format!("分段 {i} 写入失败: {e}"))?;
-                        written += n as u64;
-                        progress.fetch_add(n as u64, Ordering::Relaxed);
-                    }
-                    // ⚠️ 必须校验：连接被代理/CDN 提前掐断时 read 会直接返回 0，
-                    // 若不比对字节数就会把「前半段 + 一大片零」当成完整文件。
-                    // 文件是 set_len(total) 预分配的，事后看大小也发现不了。
-                    if written != expected {
-                        return Err(format!(
-                            "分段 {i} 数据不完整：应下载 {expected} 字节，实际只收到 {written} 字节"
-                        ));
-                    }
-                    Ok(())
-                };
-                if let Err(e) = run() {
-                    let mut slot = first_err.lock().unwrap();
-                    if slot.is_none() {
-                        *slot = Some(e);
-                    }
-                }
-            });
-        }
-        // 进度泵：分段线程各自跑，这里按 150ms 节拍发聚合进度。
-        // 同时做停滞检测——某段连接被挂起时它既不报错也不返回数据，
-        // 表现为进度卡死在 100% 不动，必须主动判失败。
-        let mut last_done = 0u64;
-        let mut stalled_ticks = 0u32;
-        loop {
-            std::thread::sleep(std::time::Duration::from_millis(150));
-            if cancel.load(Ordering::Relaxed) {
-                let mut slot = first_err.lock().unwrap();
-                if slot.is_none() {
-                    *slot = Some(cancelled_error());
-                }
-                break;
-            }
-            let done = progress.load(Ordering::Relaxed);
-            emit("download", done.min(total), total);
-            if first_err.lock().unwrap().is_some() {
-                break;
-            }
-            if done >= total {
-                break;
-            }
-            // 200 × 150ms = 30 秒
-            if done == last_done {
-                stalled_ticks += 1;
-                if stalled_ticks >= 200 {
-                    cancel.store(true, Ordering::Relaxed);
-                    let mut slot = first_err.lock().unwrap();
-                    if slot.is_none() {
-                        *slot = Some(format!(
-                            "下载停滞超过 30 秒（已收到 {done}/{total} 字节），请重试"
-                        ));
-                    }
-                    break;
-                }
-            } else {
-                stalled_ticks = 0;
-                last_done = done;
-            }
-        }
-    });
-    if let Some(e) = first_err.lock().unwrap().take() {
-        return Err(e);
-    }
-    ensure_not_cancelled(cancel)?;
-    emit("download", total, total);
-    Ok(())
-}
-
 /// 阻塞式下载 + 安装（进度事件照发）；调用方负责放在 spawn_blocking 里。
 /// 7z 路径由命令层解析后显式传入（打包环境位于资源目录）。
 fn download_and_install_blocking(
@@ -807,7 +686,7 @@ async fn download_trainer(
     let sevenz = sevenz_path(&app);
     let cancel = Arc::new(AtomicBool::new(false));
     {
-        let mut downloads = state.trainer_downloads.lock().unwrap();
+        let mut downloads = lock_or_recover(&state.trainer_downloads);
         if downloads.contains_key(&trainer_id) {
             return Err("该修改器正在下载，请先取消或等待完成".to_string());
         }
@@ -817,7 +696,7 @@ async fn download_trainer(
         download_and_install_blocking(&app, &root, &meta, &sevenz, &cancel)
     })
     .await;
-    state.trainer_downloads.lock().unwrap().remove(&trainer_id);
+    lock_or_recover(&state.trainer_downloads).remove(&trainer_id);
     join.map_err(|e| format!("下载任务失败: {e}"))?
 }
 
@@ -835,7 +714,7 @@ async fn update_trainer(
     let sevenz = sevenz_path(&app);
     let cancel = Arc::new(AtomicBool::new(false));
     {
-        let mut downloads = state.trainer_downloads.lock().unwrap();
+        let mut downloads = lock_or_recover(&state.trainer_downloads);
         if downloads.contains_key(&trainer_id) {
             return Err("该修改器正在下载，请先取消或等待完成".to_string());
         }
@@ -852,14 +731,14 @@ async fn update_trainer(
         Ok(installed)
     })
     .await;
-    state.trainer_downloads.lock().unwrap().remove(&trainer_id);
+    lock_or_recover(&state.trainer_downloads).remove(&trainer_id);
     join.map_err(|e| format!("更新任务失败: {e}"))?
 }
 
 /// 取消正在连接/下载的修改器任务；返回是否找到了在途任务。
 #[tauri::command]
 fn cancel_trainer_download(state: tauri::State<AppState>, trainer_id: String) -> bool {
-    let downloads = state.trainer_downloads.lock().unwrap();
+    let downloads = lock_or_recover(&state.trainer_downloads);
     if let Some(flag) = downloads.get(&trainer_id) {
         flag.store(true, Ordering::Relaxed);
         true
@@ -886,7 +765,7 @@ fn delete_installed_trainer(
 /// 更新检查：已安装包 vs 目录最新包（判定键 = 下载地址）
 #[tauri::command]
 fn check_trainer_updates(state: tauri::State<AppState>) -> Vec<gm_core::trainers::TrainerUpdateInfo> {
-    state.trainers.read().unwrap().check_updates(&trainers_root(&state))
+    read_or_recover(&state.trainers).check_updates(&trainers_root(&state))
 }
 
 // ======================================================================
@@ -947,7 +826,7 @@ async fn update_trainer_catalog(app: tauri::AppHandle) -> Result<CatalogUpdateRe
         for e in &errs {
             eprintln!("[trainers] {e}");
         }
-        *state.trainers.write().unwrap() = reg;
+        *write_or_recover(&state.trainers) = reg;
         Ok(CatalogUpdateResult { count, generated_at })
     })
     .await
@@ -986,7 +865,7 @@ fn add_defender_exclusion(state: tauri::State<AppState>) -> Result<(), String> {
 
 #[tauri::command]
 fn get_settings(state: tauri::State<AppState>) -> AppSettings {
-    state.settings.lock().unwrap().clone()
+    lock_or_recover(&state.settings).clone()
 }
 
 // 命令层刻意用扁平的 Option 参数做补丁式更新（只改传入项），参数数随设置增长属预期
@@ -1008,8 +887,8 @@ fn save_settings(
     webdav_password: Option<String>,
     webdav_enabled: Option<bool>,
 ) -> Result<AppSettings, String> {
-    let was_enabled = state.settings.lock().unwrap().auto_backup_enabled;
-    let mut settings = state.settings.lock().unwrap().clone();
+    let was_enabled = lock_or_recover(&state.settings).auto_backup_enabled;
+    let mut settings = lock_or_recover(&state.settings).clone();
     if let Some(path) = backup_path {
         settings.backup_path = if path.trim().is_empty() { None } else { Some(path) };
     }
@@ -1235,7 +1114,7 @@ async fn upload_backups_to_webdav(
     // 若放在下面的锁作用域里调用，同一线程重复加锁会直接死锁。
     let root = state.backups_root();
     let cfg = {
-        let s = state.settings.lock().unwrap();
+        let s = lock_or_recover(&state.settings);
         if !s.webdav_enabled {
             return Err("未启用云存档，请先在「设置 → 扩展」里打开".into());
         }
@@ -1272,7 +1151,7 @@ async fn download_cloud_backup(
     // 同上：先取 root，避免与 settings 锁互相嵌套导致死锁
     let root = state.backups_root();
     let cfg = {
-        let s = state.settings.lock().unwrap();
+        let s = lock_or_recover(&state.settings);
         if !s.webdav_enabled {
             return Err("未启用云存档".into());
         }
@@ -1309,7 +1188,7 @@ async fn list_cloud_backups(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<webdav::RemoteEntry>, String> {
     let cfg = {
-        let s = state.settings.lock().unwrap();
+        let s = lock_or_recover(&state.settings);
         if !s.webdav_enabled {
             return Err("未启用云存档".into());
         }
@@ -1384,7 +1263,7 @@ pub struct SaveDatabaseInfo {
 
 #[tauri::command]
 fn save_database_info(state: tauri::State<AppState>) -> Result<SaveDatabaseInfo, String> {
-    let path = state.db_path.lock().unwrap().clone();
+    let path = lock_or_recover(&state.db_path).clone();
     let count = validate_database(&path)?;
     let user_db = state.app_data_dir.join("database.db");
     let source = if path == user_db { "user" } else { "bundled" }.to_string();
@@ -1432,7 +1311,7 @@ async fn update_save_database(app: tauri::AppHandle) -> Result<SaveDatabaseInfo,
         std::fs::rename(&tmp, &target).map_err(|e| format!("替换数据库失败: {e}"))?;
 
         // 热切换当前数据库 + 重建修改器中文名索引
-        *state.db_path.lock().unwrap() = target.clone();
+        *lock_or_recover(&state.db_path) = target.clone();
         let zh = gm_core::database::Database::open_readonly(&target)
             .and_then(|db| db.title_zh_pairs())
             .map(gm_core::trainers::ZhNameIndex::build)
@@ -1440,7 +1319,7 @@ async fn update_save_database(app: tauri::AppHandle) -> Result<SaveDatabaseInfo,
                 eprintln!("[database] 中文名索引重建失败: {e}");
                 gm_core::trainers::ZhNameIndex::empty()
             });
-        *state.trainer_zh.write().unwrap() = zh;
+        *write_or_recover(&state.trainer_zh) = zh;
 
         let updated_at = std::fs::metadata(&target)
             .ok().and_then(|m| m.modified().ok())
@@ -1461,7 +1340,7 @@ async fn scan_installed_games(
     state: tauri::State<'_, AppState>,
     all_accounts: Option<bool>,
 ) -> Result<gm_core::scanner::ScanOutput, String> {
-    let db_path = state.db_path.lock().unwrap().clone();
+    let db_path = lock_or_recover(&state.db_path).clone();
     let customs_path = state.custom_games_path.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let db = gm_core::database::Database::open_readonly(&db_path)?;
@@ -1479,7 +1358,7 @@ async fn scan_deep_games(
     state: tauri::State<'_, AppState>,
     all_accounts: Option<bool>,
 ) -> Result<gm_core::scanner::ScanOutput, String> {
-    let db_path = state.db_path.lock().unwrap().clone();
+    let db_path = lock_or_recover(&state.db_path).clone();
     let customs_path = state.custom_games_path.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let db = gm_core::database::Database::open_readonly(&db_path)?;
@@ -1533,7 +1412,7 @@ async fn backup_game(
     pcgw_id: i64,
     all_accounts: Option<bool>,
 ) -> Result<String, String> {
-    let db_path = state.db_path.lock().unwrap().clone();
+    let db_path = lock_or_recover(&state.db_path).clone();
     let root = state.backups_root();
     let max = state.max_backups();
     let compress = state.compress();
@@ -1575,7 +1454,7 @@ async fn check_restore_conflict(
     date: String,
 ) -> Result<gm_core::restore::ConflictInfo, String> {
     let root = state.backups_root();
-    let db_path = state.db_path.lock().unwrap().clone();
+    let db_path = lock_or_recover(&state.db_path).clone();
     tauri::async_runtime::spawn_blocking(move || {
         let db = gm_core::database::Database::open_readonly(&db_path)?;
         let entry = db
@@ -1673,12 +1552,12 @@ async fn set_backup_permanent(
 fn refresh_auto_backup_blocking(app: &tauri::AppHandle) -> Result<usize, String> {
     use tauri::Manager;
     let state = app.state::<AppState>();
-    let settings = state.settings.lock().unwrap().clone();
+    let settings = lock_or_recover(&state.settings).clone();
     if !settings.auto_backup_enabled {
-        auto_backup::manager().lock().unwrap().stop_all();
+        lock_or_recover(auto_backup::manager()).stop_all();
         return Ok(0);
     }
-    let db_path = state.db_path.lock().unwrap().clone();
+    let db_path = lock_or_recover(&state.db_path).clone();
     let root = state.backups_root();
     let max = state.max_backups();
     let compress = state.compress();
@@ -1693,7 +1572,7 @@ fn refresh_auto_backup_blocking(app: &tauri::AppHandle) -> Result<usize, String>
     let keep: Vec<i64> = output.games.iter().map(|g| g.entry.pcgw_id).collect();
     let mut started = 0usize;
     {
-        let mut manager = auto_backup::manager().lock().unwrap();
+        let mut manager = lock_or_recover(auto_backup::manager());
         manager.retain(&keep); // 停止已不在列表中的游戏（卸载/移除）
         for game in &output.games {
             let id = game.entry.pcgw_id;
@@ -1736,7 +1615,7 @@ async fn batch_backup(
     state: tauri::State<'_, AppState>,
     ids: Vec<i64>,
 ) -> Result<Vec<BatchResult>, String> {
-    let db_path = state.db_path.lock().unwrap().clone();
+    let db_path = lock_or_recover(&state.db_path).clone();
     let root = state.backups_root();
     let max = state.max_backups();
     let compress = state.compress();
@@ -1782,7 +1661,7 @@ async fn batch_restore_latest(
     ids: Vec<i64>,
 ) -> Result<Vec<BatchResult>, String> {
     let root = state.backups_root();
-    let db_path = state.db_path.lock().unwrap().clone();
+    let db_path = lock_or_recover(&state.db_path).clone();
     tauri::async_runtime::spawn_blocking(move || {
         let db = gm_core::database::Database::open_readonly(&db_path)?;
         let env = gm_core::detect::detect();
@@ -1851,7 +1730,7 @@ async fn migrate_backups(
     .map_err(|e| format!("迁移任务失败: {e}"))??;
 
     // 迁移成功后才切换设置里的备份位置
-    let mut settings = state.settings.lock().unwrap().clone();
+    let mut settings = lock_or_recover(&state.settings).clone();
     settings.backup_path = Some(new_path);
     state.persist(&settings)?;
     Ok(moved)
@@ -1908,7 +1787,7 @@ async fn get_game_cover(
     install_path: Option<String>,
 ) -> Result<Option<String>, String> {
     let app_data_dir = state.app_data_dir.clone();
-    let db_path = state.db_path.lock().unwrap().clone();
+    let db_path = lock_or_recover(&state.db_path).clone();
     tauri::async_runtime::spawn_blocking(move || {
         game_cover::fetch_cover(
             &app_data_dir,
@@ -1954,7 +1833,7 @@ async fn steamgriddb_candidates(
     pcgw_id: Option<i64>,
 ) -> Result<steamgriddb::SgdbOptions, String> {
     let api_key = steamgriddb_key(&state)?;
-    let db_path = state.db_path.lock().unwrap().clone();
+    let db_path = lock_or_recover(&state.db_path).clone();
     tauri::async_runtime::spawn_blocking(move || {
         let appid = game_cover::resolve_steam_appid(
             &db_path,
@@ -1978,7 +1857,7 @@ async fn steamgriddb_apply_cover(
     candidate_url: String,
 ) -> Result<String, String> {
     let app_data_dir = state.app_data_dir.clone();
-    let db_path = state.db_path.lock().unwrap().clone();
+    let db_path = lock_or_recover(&state.db_path).clone();
     tauri::async_runtime::spawn_blocking(move || {
         steamgriddb::apply_candidate(
             &app_data_dir,
@@ -2001,7 +1880,7 @@ async fn steamgriddb_fill_missing(
 ) -> Result<steamgriddb::FillSummary, String> {
     let api_key = steamgriddb_key(&state)?;
     let app_data_dir = state.app_data_dir.clone();
-    let db_path = state.db_path.lock().unwrap().clone();
+    let db_path = lock_or_recover(&state.db_path).clone();
     tauri::async_runtime::spawn_blocking(move || {
         steamgriddb::fill_missing(&api_key, &app_data_dir, &db_path, requests)
     })
@@ -2169,7 +2048,7 @@ pub fn run() {
                     let to_tray = window
                         .app_handle()
                         .try_state::<AppState>()
-                        .map(|s| s.settings.lock().unwrap().close_to_tray)
+                        .map(|s| lock_or_recover(&s.settings).close_to_tray)
                         .unwrap_or(true);
                     if to_tray {
                         api.prevent_close();
