@@ -1,13 +1,16 @@
 {
   "_comment": [
-    "手工维护的来源修正规则，构建 fling_archive.json 时生效。",
-    "只用于「数据本身重复但与官网名字不同、自动去重识别不到」的特例。",
-    "每条的 reason 必须写清依据，方便日后复核。"
+    "已知「同一份修改器覆盖多个游戏名」的等价组，供引擎运行时去重参考。",
+    "注意：这里只登记关系，不删任何数据 —— 数据层两个来源都要保留，",
+    "去重发生在 search/match 阶段（引擎的 canonical_name 里实现）。"
   ],
-  "archive_excludes": [
+  "name_equivalents": [
     {
-      "gameName": "Monster Hunter World",
-      "reason": "官网的「Monster Hunter World: Iceborne」修改器对本体同样生效——其包文件名就是 Monster Hunter World v20200109-v20231017.Plus.67（不含 Iceborne），官网条目本身已覆盖本体。旧档这条（v1.0-v20190403，46 选项）是被取代的旧版本，保留会让同一游戏出现两个来源。"
+      "group": [
+        "Monster Hunter World",
+        "Monster Hunter World: Iceborne"
+      ],
+      "reason": "fling 官网把本体与冰原合并成一条（包文件名是 Monster Hunter World v20200109-...，不含 Iceborne），旧档另有一条本体。"
     }
   ]
 }

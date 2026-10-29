@@ -256,35 +256,10 @@ def write(name: str, data: dict) -> None:
     print(f"{name}: {len(data['trainers'])} 条 -> {path}")
 
 
-def apply_overrides(data: dict) -> dict:
-    """按 overrides.json 剔除特例条目。
-
-    只处理「数据确实重复、但两条名字不同导致自动去重识别不到」的情况
-    （例：官网 Monster Hunter World: Iceborne 的修改器其实覆盖本体，
-    旧档还留一条 Monster Hunter World）。规则写在 overrides.json 里，
-    每条都带 reason，便于日后复核。
-    """
-    ov = Path(__file__).resolve().parent / "overrides.json"
-    if not ov.exists():
-        return data
-    rules = json.loads(ov.read_text(encoding="utf-8"))
-    drop = {(r.get("gameName") or "").casefold() for r in rules.get("archive_excludes", [])}
-    drop.discard("")
-    if not drop:
-        return data
-    kept = [t for t in data["trainers"] if (t.get("gameName") or "").casefold() not in drop]
-    dropped = len(data["trainers"]) - len(kept)
-    if dropped:
-        print(f"  overrides：按规则剔除 {dropped} 条特例")
-    data["trainers"] = kept
-    data["stats"] = {**data.get("stats", {}), "count": len(kept)}
-    return data
-
-
 def main() -> int:
     only = sys.argv[1] if len(sys.argv) > 1 else "all"
     if only in ("all", "archive"):
-        write("fling_archive.json", apply_overrides(archive_catalog()))
+        write("fling_archive.json", archive_catalog())
     if only in ("all", "xiaoxing"):
         write("xiaoxing.json", xiaoxing_catalog())
     return 0

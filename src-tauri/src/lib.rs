@@ -393,7 +393,9 @@ fn download_single_stream(
     let total = resp.content_length().unwrap_or(0);
     let mut file =
         std::fs::File::create(tmp_file).map_err(|e| format!("创建临时文件失败: {e}"))?;
-    let mut buf = [0u8; 64 * 1024];
+    // 缓冲 8KB（原来 64KB）：网络慢时一次 read 要等好几秒才返回，
+    // 进度条就会"卡住不动"。小缓冲让进度每几百毫秒更新一次，观感好得多。
+    let mut buf = [0u8; 8 * 1024];
     let mut done = 0u64;
     let mut last_emit = std::time::Instant::now();
     loop {

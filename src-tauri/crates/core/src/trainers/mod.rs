@@ -186,18 +186,39 @@ pub struct TrainerUpdateInfo {
 /// 必须完整保留在 catalog 里——只是默认不跟官网那条并列显示。
 ///
 /// 只作用于同属 FLiNG 的两个来源；小幸是独立作者，同名游戏照常并列展示。
+/// 已知「同一份修改器覆盖多个游戏名」的等价组（组内第一个是代表名）。
+///
+/// 用于跨来源去重时把不同写法认作同一游戏。只登记人工确认过的关系，
+/// 依据见 scripts/trainers/overrides.json。
+const NAME_EQUIVALENTS: &[&[&str]] = &[
+    // fling 官网把本体与冰原合并成一条（包文件名是 Monster Hunter World
+    // v20200109-...，不含 Iceborne），旧档另有一条本体。
+    &["monsterhunterworldiceborne", "monsterhunterworld"],
+];
+
+/// 归一化后再按等价组合并成代表名，用作去重键。
+fn canonical_name(game_name: &str) -> String {
+    let n = normalize_name(game_name);
+    for group in NAME_EQUIVALENTS {
+        if group.iter().any(|g| *g == n) {
+            return group[0].to_string();
+        }
+    }
+    n
+}
+
 pub fn dedupe_fling_family(hits: Vec<TrainerHit>) -> Vec<TrainerHit> {
     let official: std::collections::HashSet<String> = hits
         .iter()
         .filter(|h| h.source_id == "fling")
-        .map(|h| normalize_name(&h.game_name))
+        .map(|h| canonical_name(&h.game_name))
         .collect();
     if official.is_empty() {
         return hits;
     }
     hits.into_iter()
         .filter(|h| {
-            !(h.source_id == "fling_archive" && official.contains(&normalize_name(&h.game_name)))
+            !(h.source_id == "fling_archive" && official.contains(&canonical_name(&h.game_name)))
         })
         .collect()
 }
