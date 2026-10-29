@@ -100,6 +100,8 @@ export const trainersZh: Record<string, string> = {
   "trainers.delete.confirm": "删除",
   "trainers.filter.sourceAll": "全部来源",
   "trainers.filter.sourceTip": "按修改器来源筛选（再点一次取消）",
+  "trainers.family.fling": "风灵月影",
+  "trainers.family.xiaoxing": "小幸",
 };
 
 export const trainersEn: Record<string, string> = {
@@ -207,4 +209,6 @@ export const trainersEn: Record<string, string> = {
   "trainers.delete.confirm": "Delete",
   "trainers.filter.sourceAll": "All sources",
   "trainers.filter.sourceTip": "Filter by trainer source (click again to clear)",
+  "trainers.family.fling": "FLiNG",
+  "trainers.family.xiaoxing": "XiaoXing",
 };

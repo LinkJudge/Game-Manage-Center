@@ -110,6 +110,15 @@ function gameNamesMatch(left: string, right: string): boolean {
  * 结果表的统一行：搜索/匹配视图里 hit 是目录条目、installedOf 是该条目当前
  * 装着的最新包；「只看已安装」视图里 hit 为空，信息全部来自 manifest。
  */
+/** 修改器来源家族：官网与旧档同属一位作者，筛选时合并为一个分类 */
+const SOURCE_FAMILY: Record<string, string> = {
+  fling: "fling",
+  fling_archive: "fling",
+  xiaoxing: "xiaoxing",
+};
+/** 取来源所属家族；未知来源自成一家，避免被误并 */
+const familyOf = (sourceId: string) => SOURCE_FAMILY[sourceId] ?? sourceId;
+
 interface ResultRow {
   key: string;
   hit: TrainerHit | null;
@@ -771,7 +780,8 @@ export function TrainersTab() {
             ...(row.sources?.map((s) => s.sourceId) ?? []),
           ].filter((x): x is string => Boolean(x));
           if (ids.length === 0) return true;
-          return ids.includes(sourceFilter);
+          // 按「家族」比较：选「风灵月影」时官网与旧档的条目都算命中
+          return ids.some((id) => familyOf(id) === sourceFilter);
         });
   const groupCounts: Record<TrainerGroup, number> = { installed: 0, available: 0, residual: 0 };
   for (const row of orderedRows) groupCounts[groupOfRow(row)]++;
@@ -950,32 +960,37 @@ export function TrainersTab() {
               >
                 {tr("trainers.filter.sourceAll")}
               </button>
-              {sources.map((src) => {
-                const short =
-                  src.id === "fling"
-                    ? "风灵"
-                    : src.id === "fling_archive"
-                      ? "旧档"
-                      : src.id === "xiaoxing"
-                        ? "小幸"
-                        : src.title.slice(0, 2);
-                const active = sourceFilter === src.id;
-                return (
-                  <button
-                    key={src.id}
-                    type="button"
-                    title={`${src.title}（${src.count}）`}
-                    onClick={() => setSourceFilter(active ? "all" : src.id)}
-                    className={`rounded-[0.55rem] px-2 py-1 text-xs transition-colors ${
-                      active
-                        ? "bg-foreground/10 font-medium text-foreground"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    {short}
-                  </button>
-                );
-              })}
+              {(() => {
+                // 同一作者的多个来源（风灵官网 + 风灵旧档）合并成一个筛选分类，
+                // 列表里的「来源」列仍显示具体来源，不影响辨别。
+                const fam = new Map<string, { count: number; titles: string[] }>();
+                for (const src of sources) {
+                  const key = familyOf(src.id);
+                  const cur = fam.get(key) ?? { count: 0, titles: [] };
+                  cur.count += src.count;
+                  cur.titles.push(src.title);
+                  fam.set(key, cur);
+                }
+                return Array.from(fam.entries()).map(([id, info]) => {
+                  const active = sourceFilter === id;
+                  const label = tr(`trainers.family.${id}`);
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      title={info.titles.join(" + ") + `（${info.count}）`}
+                      onClick={() => setSourceFilter(active ? "all" : id)}
+                      className={`rounded-[0.55rem] px-2 py-1 text-xs transition-colors ${
+                        active
+                          ? "bg-foreground/10 font-medium text-foreground"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  );
+                });
+              })()}
             </div>
           </ActionTooltip>
         )}
