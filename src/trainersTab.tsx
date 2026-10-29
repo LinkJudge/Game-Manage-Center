@@ -195,6 +195,17 @@ function RowProgress({
       </div>
     );
   }
+  // 服务端没给 Content-Length（分块传输）时算不出百分比。
+  // 此时不能画进度条——它会一直停在 0% 看着像卡死，改成转圈 + 已下载量。
+  if (progress.total === 0) {
+    return (
+      <div className="flex items-center justify-end gap-2 text-xs text-muted-foreground">
+        <Loader2 className="size-3.5 animate-spin" />
+        {formatBytes(progress.downloaded)}
+        {cancelButton}
+      </div>
+    );
+  }
   return (
     <div className="ml-auto flex items-center justify-end gap-2">
       <div className="w-32 text-right">
