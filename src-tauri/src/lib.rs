@@ -483,7 +483,46 @@ fn resolve_install_meta(
     })
 }
 
-/// 单流下载（Range 不可用或文件较小时的回退路径）。返回记录用的大小
+/// 用 1 字节的 Range 请求探测总大小，**只用于显示进度百分比**。
+///
+/// flingtrainer 的下载响应经常是 chunked（没有 Content-Length），但支持 Range：
+/// 回 `206 Partial Content` + `Content-Range: bytes 0-0/1885696`。
+/// 这是唯一能提前拿到总长的途径——HEAD 也不给 Content-Length。
+///
+/// ⚠️ 这个值**绝不能**用来切段或校验：实测它会比实际文件小（服务器把 .zip 当目录、
+/// 直接吐出里面的 exe，实测 1,029,292 vs 1,885,696）。拿它切段必然拼出损坏文件
+/// ——v0.4 就是栽在这里，后来连探测一起删掉，结果进度百分比也一起没了。
+fn probe_total(url: &reqwest::Url, referer: &str) -> Option<u64> {
+    let client = download_client().ok()?;
+    let resp = client
+        .get(url.clone())
+        .header("Referer", referer)
+        .header("Range", "bytes=0-0")
+        .timeout(std::time::Duration::from_secs(8))
+        .send()
+        .ok()?;
+    // 不支持 Range 会回 200 并开始传整个文件，立刻丢掉连接，别等 body
+    if resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
+        return None;
+    }
+    let value = resp
+        .headers()
+        .get(reqwest::header::CONTENT_RANGE)?
+        .to_str()
+        .ok()?
+        .to_string();
+    drop(resp);
+    parse_content_range_total(&value)
+}
+
+/// 从 `bytes 0-0/1885696` 里取总长。
+fn parse_content_range_total(value: &str) -> Option<u64> {
+    let total = value.rsplit('/').next()?.trim().parse::<u64>().ok()?;
+    (total > 0).then_some(total)
+}
+
+/// 单流下载。`hinted_total` 是探测来的估算总长（可能不准，只用来算百分比）。
+/// 返回实际收到的字节数。
 fn download_single_stream(
     client: &reqwest::blocking::Client,
     url: &reqwest::Url,
@@ -491,6 +530,7 @@ fn download_single_stream(
     tmp_file: &std::path::Path,
     cancel: &AtomicBool,
     emit: &dyn Fn(&str, u64, u64),
+    hinted_total: u64,
 ) -> Result<u64, String> {
     use std::io::{Read, Write};
     ensure_not_cancelled(cancel)?;
@@ -507,7 +547,9 @@ fn download_single_stream(
             )
         })?;
     ensure_not_cancelled(cancel)?;
-    let total = resp.content_length().unwrap_or(0);
+    // 响应自己带 Content-Length 就用它（准确）；被 chunked 化就用探测值兜底
+    let declared = resp.content_length().unwrap_or(0);
+    let total = if declared > 0 { declared } else { hinted_total };
     let mut file =
         std::fs::File::create(tmp_file).map_err(|e| format!("创建临时文件失败: {e}"))?;
     // 缓冲 8KB（原来 64KB）：网络慢时一次 read 要等好几秒才返回，
@@ -524,19 +566,20 @@ fn download_single_stream(
         file.write_all(&buf[..n]).map_err(|e| format!("写入失败: {e}"))?;
         done += n as u64;
         if last_emit.elapsed() >= std::time::Duration::from_millis(150) {
-            emit("download", done, total);
+            // 探测值偏小时（zip→exe 那种）分母要跟着涨，否则百分比越过 100 又不会回落
+            emit("download", done, total.max(done));
             last_emit = std::time::Instant::now();
         }
     }
     file.flush().map_err(|e| e.to_string())?;
-    emit("download", done, total);
+    emit("download", done, total.max(done));
     // 服务端声明的长度不可信：flingtrainer 页面标的 zip 大小是 1,027,604，
     // Range 探测回的 content-range 也写 1,029,292，实际完整 GET 却是 1,885,696
     // （服务器把 .zip 当目录、直接吐出里面的 exe）。所以只校验「不能少于声明值」，
     // 多了就按实测值接受——否则会把正常下载判成"不完整"。
-    if total > 0 && done < total {
+    if declared > 0 && done < declared {
         return Err(format!(
-            "下载不完整：应收到 {total} 字节，实际只收到 {done} 字节，请重试"
+            "下载不完整：应收到 {declared} 字节，实际只收到 {done} 字节，请重试"
         ));
     }
     Ok(done)
@@ -721,19 +764,26 @@ fn download_and_install_blocking(
         let tmp_file = tmp_dir.join("package.bin");
         ensure_not_cancelled(cancel)?;
 
-        // ⚠️ 不再做 Range 探测与并行分段。
+        // ⚠️ 并行分段已经废掉了：flingtrainer 的 CDN 元数据不一致
+        // （探测回 content-range 0-0/948445，实际单流拿到 1,635,328，
+        // 且对 Range 的 end 位置处理不可靠），按探测值切段必然拼出损坏文件。
         //
-        // 实测 flingtrainer 的 CDN 元数据不一致：
-        //   HEAD/探测返回 content-range: bytes 0-0/948445
-        //   实际单流下载 Content-Length 是 1,635,328
-        // 按 948,445 切 4 段，每段"应下载 237,111"却收到远超该值的数据
-        // （服务器对 Range 的 end 位置处理也不可靠），拼接必然错位。
-        //
-        // 单流用 Content-Length，准确；代理下 1.6MB 只需 4 秒，不需要并行提速。
+        // 但「探测」本身要留着：它给的虽然是估算值，却是**唯一**能提前拿到总长的途径
+        // （这些响应是 chunked，Content-Length 和 HEAD 都拿不到）。只用来算百分比，
+        // 不参与切段、不参与校验。0.3 有进度条就是因为有这一步。
         let url = reqwest::Url::parse(&meta.download_url)
             .map_err(|e| format!("下载地址无效: {e}"))?;
-        let total =
-            download_single_stream(&client, &url, &meta.page_url, &tmp_file, cancel, &emit)?;
+        let hinted = probe_total(&url, &meta.page_url).unwrap_or(0);
+        ensure_not_cancelled(cancel)?;
+        let total = download_single_stream(
+            &client,
+            &url,
+            &meta.page_url,
+            &tmp_file,
+            cancel,
+            &emit,
+            hinted,
+        )?;
 
         ensure_not_cancelled(cancel)?;
         // 安装（解压/落位/写 manifest）。用实测字节数覆盖目录里声称的大小：
@@ -2246,5 +2296,23 @@ mod proxy_alive_tests {
     fn rejects_garbage_input() {
         assert!(!proxy_reachable(""));
         assert!(!proxy_reachable("://"));
+    }
+}
+
+#[cfg(test)]
+mod content_range_tests {
+    use super::parse_content_range_total;
+
+    #[test]
+    fn parses_total_from_content_range() {
+        assert_eq!(parse_content_range_total("bytes 0-0/1885696"), Some(1885696));
+        assert_eq!(parse_content_range_total("bytes 0-0 / 1029292"), Some(1029292));
+    }
+
+    #[test]
+    fn rejects_unknown_or_zero_total() {
+        assert_eq!(parse_content_range_total("bytes 0-0/*"), None);
+        assert_eq!(parse_content_range_total("bytes 0-0/0"), None);
+        assert_eq!(parse_content_range_total("garbage"), None);
     }
 }
