@@ -202,8 +202,8 @@ function RowProgress({
   // 统一的下载态：有总量 → 百分比进度条；没总量（分块传输）→ 往返滑动条 + 已下载量。
   // 两种必须是同一套版式，否则列表里一半有进度条一半只有数字，看着像坏了。
   return (
-    <div className="ml-auto flex items-center justify-end gap-2">
-      <div className="w-32 text-right">
+    <div className="flex items-center justify-end gap-2">
+      <div className="w-24 text-right">
         <Progress value={pct} indeterminate={!hasTotal} className="h-1.5" />
         <div className="mt-0.5 text-[10px] tabular-nums text-muted-foreground">
           {hasTotal ? `${pct}% · ${formatBytes(progress.downloaded)}` : formatBytes(progress.downloaded)}
@@ -241,7 +241,7 @@ function ActionsCell({
   if (row.installedOf) {
     const t = row.installedOf;
     return (
-      <div className="space-x-1 text-right">
+      <div className="flex items-center justify-end gap-1">
         <ActionTooltip content={ACTION_COPY.launchTrainer.full}>
           <Button
             size="action"
@@ -1075,7 +1075,9 @@ export function TrainersTab() {
 
       {showTable ? (
         <Card className="overflow-hidden">
-          <Table>
+          {/* table-fixed + 每列显式宽度：列宽只由表头决定，行内状态从"下载"变成
+              进度条、再变成"启动/目录/删除"时，其它列不会跟着左右挪 */}
+          <Table className="min-w-[60rem] table-fixed">
             <TableHeader>
               <TableRow>
                 <TableHead className="w-12 pl-4">
@@ -1087,12 +1089,14 @@ export function TrainersTab() {
                     }}
                   />
                 </TableHead>
-                <TableHead className="w-[30%]">{tr("trainers.col.game")}</TableHead>
-                <TableHead className="w-[12%]">{tr("trainers.col.source")}</TableHead>
-                <TableHead>{tr("trainers.col.pack")}</TableHead>
-                <TableHead className="w-[15%]">{tr("trainers.col.updated")}</TableHead>
-                <TableHead className="w-[13%]">{tr("trainers.col.status")}</TableHead>
-                <TableHead className="pr-4 text-right">{tr("trainers.col.actions")}</TableHead>
+                <TableHead>{tr("trainers.col.game")}</TableHead>
+                <TableHead className="w-[7.5rem]">{tr("trainers.col.source")}</TableHead>
+                <TableHead className="w-[11rem]">{tr("trainers.col.pack")}</TableHead>
+                <TableHead className="w-[7rem]">{tr("trainers.col.updated")}</TableHead>
+                <TableHead className="w-[8rem]">{tr("trainers.col.status")}</TableHead>
+                <TableHead className="w-[14rem] text-right">
+                  {tr("trainers.col.actions")}
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -1236,7 +1240,7 @@ export function TrainersTab() {
                         </span>
                       </div>
                     </TableCell>
-                    <TableCell className="pr-4 text-right">
+                    <TableCell className="text-right">
                       <ActionsCell
                         row={row}
                         progress={
