@@ -139,23 +139,27 @@ impl Database {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<GameEntry>, String> {
-        let search_clause = match search.map(str::trim).filter(|s| !s.is_empty()) {
-            None => String::new(),
+        // 匹配串走绑定参数，绝不拼进 SQL：库里大量游戏名带撇号
+        // （Assassin's Creed / Tom Clancy's / Marvel's …），拼字符串会直接把
+        // 单引号当结束符，整个 query 语法错误——搜索这些游戏必失败。
+        let pattern = match search.map(str::trim).filter(|s| !s.is_empty()) {
+            None => "%".to_string(),
             Some(term) => {
                 // LIKE 通配符转义，用户输入按字面匹配
                 let escaped =
                     term.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
-                format!(
-                    " WHERE name_en LIKE '%{escaped}%' ESCAPE '\\' OR name_zh LIKE '%{escaped}%' ESCAPE '\\'"
-                )
+                format!("%{escaped}%")
             }
         };
+        // 没有关键词时 pattern 是 "%"，等价于不过滤；保持 SQL 形状固定
         let sql = format!(
-            "{SELECT_COLUMNS}{search_clause} ORDER BY name_en COLLATE NOCASE LIMIT ?1 OFFSET ?2"
+            "{SELECT_COLUMNS} WHERE name_en LIKE ?3 ESCAPE '\\' \
+             OR name_zh LIKE ?3 ESCAPE '\\' \
+             ORDER BY name_en COLLATE NOCASE LIMIT ?1 OFFSET ?2"
         );
         let mut stmt = self.conn.prepare(&sql).map_err(|e| e.to_string())?;
         let rows = stmt
-            .query_map(rusqlite::params![limit as i64, offset as i64], map_row)
+            .query_map(rusqlite::params![limit as i64, offset as i64, pattern], map_row)
             .map_err(|e| e.to_string())?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())
@@ -220,7 +224,9 @@ impl Database {
             return Ok(Vec::new());
         }
         let placeholders = titles.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-        let sql = format!("{SELECT_COLUMNS} WHERE name_en IN ({placeholders}) COLLATE NOCASE");
+        // COLLATE 必须跟在被比较的列上：`name_en IN (...) COLLATE NOCASE` 是把
+        // 排序规则加在布尔结果上，等于没加，大小写仍然敏感。
+        let sql = format!("{SELECT_COLUMNS} WHERE name_en COLLATE NOCASE IN ({placeholders})");
         let mut stmt = self.conn.prepare(&sql).map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map(rusqlite::params_from_iter(titles.iter()), map_row)
@@ -305,6 +311,33 @@ mod tests {
         assert!(!page.is_empty(), "搜索「{keyword}」应命中（样本中文名「{zh}」）");
         // 动态类型列转文本正常
         assert!(page.iter().any(|g| g.steam_id.is_some()));
+    }
+
+    /// 回归护栏：库里大量游戏名带撇号（Assassin's Creed / Tom Clancy's / Marvel's），
+    /// 早期把关键词直接拼进 SQL 字符串，遇到撇号整条 query 语法错误，搜索必失败。
+    #[test]
+    fn search_handles_apostrophes_and_wildcards() {
+        let Some(path) = test_db_path() else { return };
+        let db = Database::open_readonly(&path).unwrap();
+        let page = db.list_games(Some("Assassin's Creed"), 10, 0).unwrap();
+        assert!(!page.is_empty(), "带撇号的搜索必须能返回结果");
+        // LIKE 通配符按字面处理：`%` 不该变成"匹配任意"
+        assert!(
+            db.list_games(Some("zz%zz"), 10, 0).unwrap().is_empty(),
+            "`%` 必须被转义成普通字符"
+        );
+        // 空关键词等价于不过滤
+        let all = db.list_games(Some("   "), 5, 0).unwrap();
+        assert_eq!(all.len(), 5);
+    }
+
+    /// COLLATE 必须落在列上，否则大小写仍然敏感
+    #[test]
+    fn list_by_titles_is_case_insensitive() {
+        let Some(path) = test_db_path() else { return };
+        let db = Database::open_readonly(&path).unwrap();
+        let hit = db.list_games_by_titles(&["cyberpunk 2077"]).unwrap();
+        assert_eq!(hit.len(), 1, "小写标题也应命中 Cyberpunk 2077");
     }
 
     #[test]
