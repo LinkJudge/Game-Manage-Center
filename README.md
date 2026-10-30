@@ -24,7 +24,7 @@
 
 ## 功能
 
-### <img src="public/icons/save.svg" width="28" height="28" align="middle" alt=""> 存档管理
+### <img src="public/icons/save.svg" width="24" height="24" align="top" alt=""> 存档管理
 
 | 能力 | 说明 |
 |---|---|
@@ -37,7 +37,7 @@
 | **自定义游戏** | 手动添加任意路径或注册表项 |
 | **系统托盘** | 关窗可驻留后台，托盘菜单可直接恢复或退出 |
 
-### <img src="public/icons/trainer.svg" width="28" height="28" align="middle" alt=""> 修改器管理
+### <img src="public/icons/trainer.svg" width="24" height="24" align="top" alt=""> 修改器管理
 
 | 能力 | 说明 |
 |---|---|
@@ -49,7 +49,7 @@
 | **残留检测** | 已安装但游戏已卸载的修改器单独归类，可一键清理 |
 | **Defender 助手** | 一键把修改器目录加入排除项，避免杀软误删 |
 
-### <img src="public/icons/mod.svg" width="28" height="28" align="middle" alt=""> MOD 管理
+### <img src="public/icons/mod.svg" width="24" height="24" align="top" alt=""> MOD 管理
 
 规划中。计划支持 MOD 安装、版本管理与冲突排查。
 
