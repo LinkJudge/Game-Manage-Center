@@ -6,7 +6,7 @@ resolver = "2"
 name = "game-manage-center"
 version = "0.5.0"
 description = "Game Manage Center - centralize, back up and restore your game saves"
-authors = ["you"]
+authors = ["LinkJudge"]
 license = "GPL-3.0-only"
 edition = "2021"
 
