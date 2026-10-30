@@ -43,15 +43,21 @@
 
 ```
 MediaWiki API (action=query&prop=revisions)
-  → pcgw-extract.js      解析 wikitext，抽 {{Game data/saves|OS|路径}}
-  → sync-pcgamingwiki.js 合并旧库 → 生成新库
-  → apply_pcgw_delta.py  原地合并进 games 表（保护中文名）
+  → pcgw-extract.js       解析 wikitext，抽 {{Game data/saves|OS|路径}}
+  → sync-pcgamingwiki.js  合并旧库 → 产出 database/build-rows.json
+  → build_db.py           把行数据写成 database.new.db（Python，1 秒）
+  → apply_pcgw_delta.py   原地合并进 games 表（保护中文名）
 ```
 
 - 全量：枚举页面清单 → 分批取 wikitext → 解析
 - 增量：`incremental-sync.cjs --since <时间> --proxy <代理>` 走 recentchanges
 - **必须走代理**：直连 `pcgamingwiki.com` 返回 403（Cloudflare 挑战页），
   本机实测 `--proxy http://127.0.0.1:7897` 才能通
+- 增量抓取支持断点续传（`incremental-done.json` 记录已完成 pageid），
+  网络抖动会重试 3 次，只有 403 / 非 JSON 才判定为 Cloudflare 挑战并立即退出
+- **写库不用 node-sqlite3**：它的 `db.run('BEGIN')` 只是入队、不保证先于
+  `stmt.run` 执行，事务开不起来，5.2 万条要跑十几分钟；Python 的
+  `executemany` 在一个事务里 1 秒完成
 
 ### 采集边界（重要）
 

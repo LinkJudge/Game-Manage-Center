@@ -56,7 +56,7 @@ FIELDS = [
 # install_dir 有 5,235 条不同，是两套推断规则打架（上游 `123kickit`、
 # 我们 `1... 2... 3... KICK IT!`），没有一边绝对正确。当前值经过验证，
 # 一次性覆盖 5,235 条只会引入 5,235 个未知风险 —— 要改必须显式加开关。
-OPT_IN_FIELDS = {"install_dir", "stores", "save_paths"}
+OPT_IN_FIELDS = {"name_en", "install_dir", "stores", "save_paths"}
 
 
 def leading_int(value: object) -> int | None:
@@ -109,6 +109,9 @@ def main() -> int:
     parser.add_argument("--source", type=Path, default=SOURCE)
     parser.add_argument("--target", type=Path, default=TARGET)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--update-title", action="store_true",
+                        help="用 PCGW 页面标题覆盖 name_en（默认不覆盖：英文名以 Steam 官方为准，"
+                             "由 rebuild_names.py 统一定夺；只有新增行会写入）")
     parser.add_argument("--update-install-dir", action="store_true",
                         help="用上游 install_folder 覆盖我们推断的 install_dir（默认不覆盖）")
     parser.add_argument("--update-stores", action="store_true",
@@ -149,11 +152,12 @@ def main() -> int:
 
     # 哪些高风险字段这次允许被覆盖
     opt_in = {
+        "name_en": args.update_title,
         "install_dir": args.update_install_dir,
         "stores": args.update_stores,
         "save_paths": args.update_save_paths,
     }
-    print("同步字段：name_en / steam_appid / gog_appid"
+    print("同步字段：steam_appid / gog_appid"
           + "".join(f" / {k}" for k, v in opt_in.items() if v)
           + ("（其余保持现值）" if not all(opt_in.values()) else ""))
 

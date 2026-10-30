@@ -258,6 +258,12 @@ function writeDb(rows, outPath) {
                     value TEXT
                 )`);
       const stmt = d.prepare('INSERT OR REPLACE INTO games VALUES (?,?,?,?,?,?,?,?)');
+      // 必须包一个事务：sqlite3 的每条 run 默认自成一个事务并 fsync 一次，
+      // 5.2 万条要跑十几分钟（实测卡在 2 MB 不动）。
+      // 注意：`db.run('BEGIN')` 只是把语句排进队列、不保证先于 stmt.run 执行，
+      // 事务实际没开起来；必须用 exec（同步立即执行）开事务，
+      // COMMIT 放到 wait 回调里，等所有 run 出队后再提交。
+      d.exec('BEGIN');
       for (const r of rows) {
         stmt.run(r.title, r.wiki_page_id, r.install_folder, r.steam_id, r.gog_id, r.save_location, r.platform, r.zh_CN);
       }
@@ -266,7 +272,11 @@ function writeDb(rows, outPath) {
       d.run('INSERT INTO metadata VALUES (?,?)', ['last_recent_change_time', now]);
       d.run('INSERT INTO metadata VALUES (?,?)', ['sync_source', 'pcgamingwiki-wikitext']);
       d.run('INSERT INTO metadata VALUES (?,?)', ['synced_at', now]);
-      d.wait(() => { d.close(); res(); });
+      d.wait(() => {
+        d.exec('COMMIT');
+        d.close();
+        res();
+      });
     });
   });
 }
@@ -299,7 +309,11 @@ function writeDb(rows, outPath) {
 
   if (COMPARE_ONLY || PAGES_FILE) { console.log('（未写库）'); return; }
 
-  console.log('写库 →', OUT_DB);
-  await writeDb(rows, OUT_DB);
-  console.log('完成。确认无误后手动替换 database/database.db');
+  // 写库交给 build_db.py：node-sqlite3 的批量插入开不起事务
+  // （db.run('BEGIN') 只是入队，不保证先于 stmt.run 执行；exec 也不行），
+  // 5.2 万条要跑十几分钟。Python 的 executemany 在一个事务里几秒完成。
+  const rowsJson = path.join(ROOT, 'database', 'build-rows.json');
+  fs.writeFileSync(rowsJson, JSON.stringify(rows));
+  console.log('行数据 →', rowsJson, `(${rows.length} 行)`);
+  console.log('下一步：python scripts/pcgw/build_db.py');
 })().catch((e) => { console.error(e); process.exit(1); });
