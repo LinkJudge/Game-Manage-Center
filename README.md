@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="public/icons/app.svg" width="88" alt="Game Manage Center">
+
 # 游戏管理中心
 
 **Game Manage Center** · 统一管理游戏的存档、修改器与 MOD
@@ -22,7 +24,15 @@
 
 ## 功能
 
-### 存档管理
+<table>
+<tr>
+<td align="center" width="33%"><img src="public/icons/save.svg" width="56" alt="存档管理"><br><b>存档管理</b><br><sub>扫描 · 备份 · 恢复 · 自动备份</sub></td>
+<td align="center" width="33%"><img src="public/icons/trainer.svg" width="56" alt="修改器管理"><br><b>修改器管理</b><br><sub>搜索 · 下载 · 启动 · 更新</sub></td>
+<td align="center" width="33%"><img src="public/icons/mod.svg" width="56" alt="MOD"><br><b>MOD</b><br><sub>规划中</sub></td>
+</tr>
+</table>
+
+### <img src="public/icons/save.svg" width="20" align="middle" alt=""> 存档管理
 
 | 能力 | 说明 |
 |---|---|
@@ -35,7 +45,7 @@
 | **自定义游戏** | 手动添加任意路径或注册表项 |
 | **系统托盘** | 关窗可驻留后台，托盘菜单可直接恢复或退出 |
 
-### 修改器管理
+### <img src="public/icons/trainer.svg" width="20" align="middle" alt=""> 修改器管理
 
 | 能力 | 说明 |
 |---|---|
@@ -103,10 +113,10 @@ Game-Manage-Center/
 
 ## 路线图
 
-- [x] **存档管理** — 扫描 / 备份 / 恢复 / 自动备份（v0.1.0）
-- [x] **修改器** — 目录搜索、下载安装、启动与更新（v0.3.0）
+- [x] <img src="public/icons/save.svg" width="18" align="middle" alt=""> **存档管理** — 扫描 / 备份 / 恢复 / 自动备份（v0.1.0）
+- [x] <img src="public/icons/trainer.svg" width="18" align="middle" alt=""> **修改器** — 目录搜索、下载安装、启动与更新（v0.3.0）
 - [x] **视觉与多来源** — 界面重做、封面链、多来源折叠（v0.4.0）
-- [ ] **MOD** — 安装、版本管理与冲突排查
+- [ ] <img src="public/icons/mod.svg" width="18" align="middle" alt=""> **MOD** — 安装、版本管理与冲突排查
 
 ## 许可
 
