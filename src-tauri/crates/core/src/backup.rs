@@ -50,24 +50,40 @@ fn write_game_index(game_dir: &Path, index: &GameIndex) -> Result<(), String> {
     write_json_atomic(&game_dir.join(GAME_INDEX_FILE), index)
 }
 
-/// 解析 pcgw_id 对应的游戏目录：扫描根目录下各 game.json 归属匹配。
-/// 兼容旧布局（目录名为数字 id）：数字目录直接匹配。
-pub fn game_dir_for(backups_root: &Path, pcgw_id: i64) -> Option<PathBuf> {
-    let entries = fs::read_dir(backups_root).ok()?;
+/// 找出**所有**声明归属于该游戏的备份目录。
+///
+/// 正常情况只有一个。但游戏英文名改过之后，备份目录名会跟着变
+/// （目录名 = `game_dir_name(title)`），旧目录仍然留在磁盘上，
+/// 于是一个 `pcgw_id` 可能对应多个目录。只认第一个会让用户
+/// 「改名前的备份凭空消失」，所以读取侧必须把所有目录都算进来。
+///
+/// 写操作（新建备份）仍只用一个目录，见 `game_dir_for`。
+pub fn game_dirs_for(backups_root: &Path, pcgw_id: i64) -> Vec<PathBuf> {
+    let mut found: Vec<PathBuf> = Vec::new();
     let numeric = backups_root.join(pcgw_id.to_string());
     if numeric.is_dir() {
-        return Some(numeric); // 旧布局（未迁移时兜底）
+        found.push(numeric); // 旧布局（未迁移时兜底）
     }
-    for entry in entries.flatten() {
-        let dir = entry.path();
-        if !dir.is_dir() {
-            continue;
-        }
-        if read_game_index(&dir).map(|i| i.pcgw_id) == Some(pcgw_id) {
-            return Some(dir);
+    if let Ok(entries) = fs::read_dir(backups_root) {
+        for entry in entries.flatten() {
+            let dir = entry.path();
+            if !dir.is_dir() || found.contains(&dir) {
+                continue;
+            }
+            if read_game_index(&dir).map(|i| i.pcgw_id) == Some(pcgw_id) {
+                found.push(dir);
+            }
         }
     }
-    None
+    found
+}
+
+/// 解析 pcgw_id 对应的游戏目录：扫描根目录下各 game.json 归属匹配。
+/// 兼容旧布局（目录名为数字 id）：数字目录直接匹配。
+///
+/// 只有一个目录时就是它；有多个（改名遗留）时取第一个，用于写入新备份。
+pub fn game_dir_for(backups_root: &Path, pcgw_id: i64) -> Option<PathBuf> {
+    game_dirs_for(backups_root, pcgw_id).into_iter().next()
 }
 
 /// 旧布局迁移：数字命名的游戏目录 → 游戏名目录。
@@ -693,46 +709,54 @@ pub fn apply_rotation(game_backup_path: &Path, max_backups: u32) -> Result<(), S
 
 /// 枚举一个游戏的全部备份（zip 与目录实例混合，按时间戳倒序）
 pub fn list_backups(backups_root: &Path, pcgw_id: i64) -> Result<Option<GameBackups>, String> {
-    let Some(game_backup_path) = game_dir_for(backups_root, pcgw_id) else {
+    let dirs = game_dirs_for(backups_root, pcgw_id);
+    if dirs.is_empty() {
         return Ok(None);
-    };
-
-    let mut backups: Vec<BackupSummary> = Vec::new();
-    for entry in fs::read_dir(&game_backup_path).map_err(|e| e.to_string())?.flatten() {
-        let raw_name = entry.file_name().to_string_lossy().to_string();
-        let (date, summary) = if entry.metadata().map(|m| m.is_dir()).unwrap_or(false) {
-            // 目录式备份（未压缩）
-            let manifest = match read_manifest_in(&entry.path()) {
-                Ok(m) => m,
-                Err(_) => continue,
-            };
-            (raw_name, BackupSummary::from((String::new(), manifest)))
-        } else if raw_name.to_lowercase().ends_with(".zip") {
-            // zip 压缩备份：磁盘占用即文件大小，清单里记录的是打包前逻辑大小
-            let Some(stem) = raw_name.strip_suffix(".zip") else { continue };
-            let manifest = match read_zip_manifest(&entry.path()) {
-                Ok(m) => m,
-                Err(_) => continue,
-            };
-            (stem.to_string(), BackupSummary::from((String::new(), manifest)))
-        } else {
-            continue;
-        };
-        let mut summary = summary;
-        summary.date = date;
-        backups.push(summary);
     }
 
-    if backups.is_empty() {
+    // 同一游戏可能有多个目录（title 改过之后新备份进新目录、旧目录还在）。
+    // 全部扫进来，按 date 去重——同一天只保留先扫到的那个。
+    let mut found: Vec<(BackupSummary, PathBuf)> = Vec::new();
+    for game_backup_path in &dirs {
+        for entry in fs::read_dir(game_backup_path).map_err(|e| e.to_string())?.flatten() {
+            let raw_name = entry.file_name().to_string_lossy().to_string();
+            let (date, summary) = if entry.metadata().map(|m| m.is_dir()).unwrap_or(false) {
+                // 目录式备份（未压缩）
+                let manifest = match read_manifest_in(&entry.path()) {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                };
+                (raw_name, BackupSummary::from((String::new(), manifest)))
+            } else if raw_name.to_lowercase().ends_with(".zip") {
+                // zip 压缩备份：磁盘占用即文件大小，清单里记录的是打包前逻辑大小
+                let Some(stem) = raw_name.strip_suffix(".zip") else { continue };
+                let manifest = match read_zip_manifest(&entry.path()) {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                };
+                (stem.to_string(), BackupSummary::from((String::new(), manifest)))
+            } else {
+                continue;
+            };
+            let mut summary = summary;
+            summary.date = date;
+            if found.iter().any(|(s, _)| s.date == summary.date) {
+                continue;
+            }
+            found.push((summary, game_backup_path.clone()));
+        }
+    }
+
+    if found.is_empty() {
         return Ok(None);
     }
     // 实例名即时间戳，字典序即时间序
-    backups.sort_by(|a, b| b.date.cmp(&a.date));
+    found.sort_by(|a, b| b.0.date.cmp(&a.0.date));
+    let latest_path = found[0].1.join(&found[0].0.date);
+    let mut backups: Vec<BackupSummary> = found.into_iter().map(|(s, _)| s).collect();
 
     // 列表只展示最新实例的实测大小；缺失时补量一次并回写清单（仅目录式实例）
     if backups[0].backup_size.is_none() {
-        let latest_date = backups[0].date.clone();
-        let latest_path = game_backup_path.join(&latest_date);
         if latest_path.is_dir() {
             let (size, _) = crate::scanner::walk_size(&latest_path);
             if let Some(summary) = backups.first_mut() {
@@ -775,6 +799,7 @@ pub fn list_all_backups(backups_root: &Path) -> Result<Vec<GameBackups>, String>
     if !backups_root.is_dir() {
         return Ok(games);
     }
+    let mut seen_ids: std::collections::HashSet<i64> = std::collections::HashSet::new();
     for entry in fs::read_dir(backups_root).map_err(|e| e.to_string())?.flatten() {
         if !entry.metadata().map(|m| m.is_dir()).unwrap_or(false) {
             continue;
@@ -787,6 +812,10 @@ pub fn list_all_backups(backups_root: &Path) -> Result<Vec<GameBackups>, String>
                 None => continue,
             },
         };
+        // 同一 pcgw_id 可能有多个目录（改名遗留），只处理一次
+        if !seen_ids.insert(id) {
+            continue;
+        }
         if let Some(game) = list_backups(backups_root, id)? {
             games.push(game);
         }
@@ -958,6 +987,63 @@ mod tests {
         assert!(reloaded.backups[0].is_permanent);
         delete_backup(&backups_root, 42, &reloaded.backups[0].date).unwrap();
         assert_eq!(list_backups(&backups_root, 42).unwrap().unwrap().backups.len(), 1);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// 同一 pcgw_id 对应多个目录时（游戏英文名改过，旧目录留在磁盘上），
+    /// 列表必须把两个目录的备份都算进来，否则用户会觉得改名前的备份丢了。
+    #[test]
+    fn renamed_game_dir_merges_by_pcgw_id() {
+        let root = std::env::temp_dir().join(format!("gm-rename-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let src = root.join("src");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("a.sav"), vec![b'x'; 64]).unwrap();
+
+        let resolved = vec![ResolvedPath {
+            template: "{{p|game}}\\saves".into(),
+            final_template: "{{p|game}}\\saves".into(),
+            resolved: src.join("a.sav").to_string_lossy().to_string(),
+            kind: ResolvedKind::File,
+            content_kind: "saves".into(),
+        }];
+        let backups_root = root.join("backups");
+
+        // 两个备份实例（时间戳精确到秒，错开一秒保证目录名不同）
+        backup_game(&test_entry(), &resolved, &backups_root, 5, false).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        backup_game(&test_entry(), &resolved, &backups_root, 5, false).unwrap();
+
+        // 模拟改名：把较早的实例挪到另一个目录，并让新目录同样声明 pcgw_id=42
+        let listed = list_backups(&backups_root, 42).unwrap().unwrap();
+        assert_eq!(listed.backups.len(), 2);
+        let older = listed.backups[1].date.clone();
+        let renamed_dir = backups_root.join("CoolGame Renamed");
+        fs::create_dir_all(&renamed_dir).unwrap();
+        write_game_index(
+            &renamed_dir,
+            &GameIndex {
+                schema: GAME_INDEX_SCHEMA.into(),
+                pcgw_id: 42,
+                title: "CoolGame Renamed".into(),
+            },
+        )
+        .unwrap();
+        fs::rename(
+            backups_root.join("CoolGame").join(&older),
+            renamed_dir.join(&older),
+        )
+        .unwrap();
+
+        // 单游戏列表：两个目录的实例都要出现
+        let merged = list_backups(&backups_root, 42).unwrap().unwrap();
+        assert_eq!(merged.backups.len(), 2, "改名前后两个目录的备份都要列出");
+
+        // 总列表：同一 pcgw_id 只能出现一次
+        let all = list_all_backups(&backups_root).unwrap();
+        assert_eq!(all.len(), 1, "同一 pcgw_id 不应因为多目录而重复");
+        assert_eq!(all[0].backups.len(), 2);
+
         let _ = fs::remove_dir_all(&root);
     }
 
