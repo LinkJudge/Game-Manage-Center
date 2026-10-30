@@ -24,15 +24,7 @@
 
 ## 功能
 
-<table>
-<tr>
-<td align="center" width="33%"><img src="public/icons/save.svg" width="56" alt="存档管理"><br><b>存档管理</b><br><sub>扫描 · 备份 · 恢复 · 自动备份</sub></td>
-<td align="center" width="33%"><img src="public/icons/trainer.svg" width="56" alt="修改器管理"><br><b>修改器管理</b><br><sub>搜索 · 下载 · 启动 · 更新</sub></td>
-<td align="center" width="33%"><img src="public/icons/mod.svg" width="56" alt="MOD"><br><b>MOD</b><br><sub>规划中</sub></td>
-</tr>
-</table>
-
-### <img src="public/icons/save.svg" width="20" align="middle" alt=""> 存档管理
+### <img src="public/icons/save.svg" width="28" height="28" align="middle" alt=""> 存档管理
 
 | 能力 | 说明 |
 |---|---|
@@ -45,7 +37,7 @@
 | **自定义游戏** | 手动添加任意路径或注册表项 |
 | **系统托盘** | 关窗可驻留后台，托盘菜单可直接恢复或退出 |
 
-### <img src="public/icons/trainer.svg" width="20" align="middle" alt=""> 修改器管理
+### <img src="public/icons/trainer.svg" width="28" height="28" align="middle" alt=""> 修改器管理
 
 | 能力 | 说明 |
 |---|---|
@@ -56,6 +48,10 @@
 | **多来源** | 风灵月影主目录 + 历史归档 + 小幸；同一游戏多来源折叠为一行，按需选择 |
 | **残留检测** | 已安装但游戏已卸载的修改器单独归类，可一键清理 |
 | **Defender 助手** | 一键把修改器目录加入排除项，避免杀软误删 |
+
+### <img src="public/icons/mod.svg" width="28" height="28" align="middle" alt=""> MOD 管理
+
+规划中。计划支持 MOD 安装、版本管理与冲突排查。
 
 ### 更新与界面
 
