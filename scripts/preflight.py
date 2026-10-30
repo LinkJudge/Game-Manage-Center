@@ -84,6 +84,9 @@ def main() -> int:
     big = []
     for path in files:
         rel = path.relative_to(ROOT).as_posix()
+        # 本脚本自己写着这些模式串，检查自己必然误报
+        if rel == "scripts/preflight.py":
+            continue
         if CREDENTIAL_FILES.search(rel):
             errors.append(f"[凭据文件] {rel} 不应入库")
             continue
