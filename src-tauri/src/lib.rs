@@ -2,6 +2,7 @@
 mod game_cover;
 mod steamgriddb;
 mod webdav;
+mod download;
 
 use gm_core::settings::AppSettings;
 use serde::{Deserialize, Serialize};
@@ -45,10 +46,7 @@ fn write_or_recover<T>(l: &std::sync::RwLock<T>) -> std::sync::RwLockWriteGuard<
 
 impl AppState {
     fn backups_root(&self) -> PathBuf {
-        let root = self
-            .settings
-            .lock()
-            .unwrap()
+        let root = lock_or_recover(&self.settings)
             .backup_path
             .as_ref()
             .map(PathBuf::from)
@@ -465,6 +463,7 @@ fn effective_proxy() -> Option<String> {
 /// 下载客户端：站点要求 UA + Referer；代理走环境变量或 Windows 系统代理
 fn download_client() -> Result<reqwest::blocking::Client, String> {
     let mut builder = reqwest::blocking::Client::builder()
+        .no_proxy()
         .user_agent(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
         )
@@ -525,74 +524,6 @@ fn shown_total(total: u64, done: u64) -> u64 {
     }
 }
 
-/// 单流下载。`fallback_total` 是目录里记录的包大小，用作进度分母。
-///
-/// flingtrainer 的下载响应经常是 chunked（没有 Content-Length）。曾经试过
-/// 用 `Range: bytes=0-0` 探测总长（0.3 的做法），但实测**探测要 7.9 秒，
-/// 而整个包下载只要 1.8 秒**——探测比下载还慢，还没等它回来文件就下完了，
-/// 纯粹白等一轮。所以直接拿目录里的 sizeBytes 当分母，立刻就有百分比。
-fn download_single_stream(
-    client: &reqwest::blocking::Client,
-    url: &reqwest::Url,
-    referer: &str,
-    tmp_file: &std::path::Path,
-    cancel: &AtomicBool,
-    emit: &dyn Fn(&str, u64, u64),
-    fallback_total: u64,
-) -> Result<u64, String> {
-    use std::io::{Read, Write};
-    ensure_not_cancelled(cancel)?;
-    let mut resp = client
-        .get(url.clone())
-        .header("Referer", referer)
-        .send()
-        .map_err(|e| format!("下载请求失败: {e}"))?
-        .error_for_status()
-        .map_err(|e| {
-            format!(
-                "下载被拒绝（{}）。站点可能开启风控，稍后再试",
-                e.status().unwrap_or_default()
-            )
-        })?;
-    ensure_not_cancelled(cancel)?;
-    // 响应自带 Content-Length 最准；没有（chunked）就用目录里的包大小兜底。
-    // 0 表示"确实不知道总量"，前端据此画往返滑动条而不是百分比。
-    let declared = resp.content_length().unwrap_or(0);
-    let total = if declared > 0 { declared } else { fallback_total };
-    let mut file =
-        std::fs::File::create(tmp_file).map_err(|e| format!("创建临时文件失败: {e}"))?;
-    // 缓冲 8KB（原来 64KB）：网络慢时一次 read 要等好几秒才返回，
-    // 进度条就会"卡住不动"。小缓冲让进度每几百毫秒更新一次，观感好得多。
-    let mut buf = [0u8; 8 * 1024];
-    let mut done = 0u64;
-    let mut last_emit = std::time::Instant::now();
-    loop {
-        ensure_not_cancelled(cancel)?;
-        let n = resp.read(&mut buf).map_err(|e| format!("下载中断: {e}"))?;
-        if n == 0 {
-            break;
-        }
-        file.write_all(&buf[..n]).map_err(|e| format!("写入失败: {e}"))?;
-        done += n as u64;
-        if last_emit.elapsed() >= std::time::Duration::from_millis(150) {
-            emit("download", done, shown_total(total, done));
-            last_emit = std::time::Instant::now();
-        }
-    }
-    file.flush().map_err(|e| e.to_string())?;
-    emit("download", done, shown_total(total, done));
-    // 服务端声明的长度不可信：flingtrainer 页面标的 zip 大小是 1,027,604，
-    // Range 探测回的 content-range 也写 1,029,292，实际完整 GET 却是 1,885,696
-    // （服务器把 .zip 当目录、直接吐出里面的 exe）。所以只校验「不能少于声明值」，
-    // 多了就按实测值接受——否则会把正常下载判成"不完整"。
-    if declared > 0 && done < declared {
-        return Err(format!(
-            "下载不完整：应收到 {declared} 字节，实际只收到 {done} 字节，请重试"
-        ));
-    }
-    Ok(done)
-}
-
 /// 阻塞式下载 + 安装（进度事件照发）；调用方负责放在 spawn_blocking 里。
 /// 7z 路径由命令层解析后显式传入（打包环境位于资源目录）。
 fn download_and_install_blocking(
@@ -630,7 +561,6 @@ fn download_and_install_blocking(
     let tmp_dir = root.join(format!(".download-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&tmp_dir).map_err(|e| format!("创建临时目录失败: {e}"))?;
     let result = (|| -> Result<gm_core::trainers::install::InstalledTrainer, String> {
-        let client = download_client()?;
         let tmp_file = tmp_dir.join("package.bin");
         ensure_not_cancelled(cancel)?;
 
@@ -648,8 +578,7 @@ fn download_and_install_blocking(
             .map_err(|e| format!("下载地址无效: {e}"))?;
         let fallback_total = meta.size_bytes.unwrap_or(0);
         ensure_not_cancelled(cancel)?;
-        let total = download_single_stream(
-            &client,
+        let total = download::transfer(
             &url,
             &meta.page_url,
             &tmp_file,
@@ -669,6 +598,11 @@ fn download_and_install_blocking(
         emit("extract", 0, total);
         let outcome =
             gm_core::trainers::install::install_package(&tmp_file, &meta, root, sevenz)?;
+        if cancel.load(Ordering::SeqCst) {
+            gm_core::trainers::install::delete_installed(root, &outcome.folder)
+                .map_err(|e| format!("已取消，但清理新安装文件失败: {e}"))?;
+            return Err(cancelled_error());
+        }
         emit("done", total, total);
 
         Ok(gm_core::trainers::install::InstalledTrainer {
@@ -1254,11 +1188,7 @@ fn set_autostart(app: tauri::AppHandle, enabled: bool) -> Result<bool, String> {
 /// 校验一个 SQLite 文件确为有效的存档数据库（返回游戏条数）
 fn validate_database(path: &std::path::Path) -> Result<i64, String> {
     let db = gm_core::database::Database::open_readonly(path)?;
-    let count = db.total_games()?;
-    if count <= 0 {
-        return Err("数据库为空".to_string());
-    }
-    Ok(count)
+    db.validate_catalog()
 }
 
 /// 当前存档数据库信息（条数 / 来源 / 更新时间）
@@ -1316,21 +1246,17 @@ async fn update_save_database(app: tauri::AppHandle) -> Result<SaveDatabaseInfo,
         let target = state.app_data_dir.join("database.db");
         let tmp = state.app_data_dir.join("database.db.tmp");
         std::fs::write(&tmp, &bytes).map_err(|e| format!("写入临时文件失败: {e}"))?;
-        let count = validate_database(&tmp).map_err(|e| {
+        let (count, zh) = (|| {
+            let db = gm_core::database::Database::open_readonly(&tmp)?;
+            let count = db.validate_catalog()?;
+            let zh = gm_core::trainers::ZhNameIndex::build_full(db.title_names()?);
+            Ok::<_, String>((count, zh))
+        })().map_err(|e| {
             let _ = std::fs::remove_file(&tmp);
             format!("下载数据库校验失败: {e}")
         })?;
         std::fs::rename(&tmp, &target).map_err(|e| format!("替换数据库失败: {e}"))?;
-
-        // 热切换当前数据库 + 重建修改器中文名索引
         *lock_or_recover(&state.db_path) = target.clone();
-        let zh = gm_core::database::Database::open_readonly(&target)
-            .and_then(|db| db.title_names())
-            .map(gm_core::trainers::ZhNameIndex::build_full)
-            .unwrap_or_else(|e| {
-                eprintln!("[database] 中文名索引重建失败: {e}");
-                gm_core::trainers::ZhNameIndex::empty()
-            });
         *write_or_recover(&state.trainer_zh) = zh;
 
         let updated_at = std::fs::metadata(&target)
@@ -1944,7 +1870,7 @@ pub fn run() {
             let user_db = app_data_dir.join("database.db");
             if user_db != db_path && user_db.exists() {
                 let valid = gm_core::database::Database::open_readonly(&user_db)
-                    .and_then(|db| db.total_games())
+                    .and_then(|db| db.validate_catalog())
                     .map(|n| n > 0)
                     .unwrap_or(false);
                 if valid {

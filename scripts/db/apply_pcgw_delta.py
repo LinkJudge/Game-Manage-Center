@@ -36,7 +36,7 @@ from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-TARGET = ROOT / "src-tauri" / "resources" / "database.db"
+TARGET = ROOT / "scripts" / "pcgw" / "database" / "gmc-dev-full.db"
 SOURCE = ROOT / "scripts" / "pcgw" / "database" / "database.new.db"
 BACKUP_DIR = ROOT.parent / ".workbuddy" / "database-backups"
 

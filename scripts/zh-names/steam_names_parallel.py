@@ -34,11 +34,12 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
+from collection_state import validate_target
 
 import requests
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_DB = ROOT / "src-tauri" / "resources" / "database.db"
+DEFAULT_DB = ROOT / "scripts" / "pcgw" / "database" / "gmc-dev-full.db"
 API = "https://store.steampowered.com/api/appdetails?appids={appid}&l=schinese&cc=cn&filters=basic"
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -195,6 +196,7 @@ def main() -> int:
     parser.add_argument("--hot-top", type=int, default=0, help="只取榜单前 N 名（0=榜上全部）")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+    args.db = validate_target(args.db)
 
     if args.probe:
         args.workers, args.limit = 2, 20

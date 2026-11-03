@@ -30,7 +30,7 @@ from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-DB = ROOT / "src-tauri" / "resources" / "database.db"
+DB = ROOT / "scripts" / "pcgw" / "database" / "gmc-dev-full.db"
 DEFAULT_OUT = ROOT.parent / ".workbuddy" / "reports" / "zh-names-nonstandard.csv"
 
 CJK = re.compile(r"[\u4e00-\u9fff]")

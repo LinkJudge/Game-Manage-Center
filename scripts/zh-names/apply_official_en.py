@@ -22,7 +22,7 @@ from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-DB = ROOT / "src-tauri" / "resources" / "database.db"
+DB = ROOT / "scripts" / "pcgw" / "database" / "gmc-dev-full.db"
 BACKUP_DIR = ROOT.parent / ".workbuddy" / "database-backups"
 
 

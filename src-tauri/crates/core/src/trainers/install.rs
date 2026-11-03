@@ -234,7 +234,7 @@ pub fn install_package(
         ));
     }
     let staging = root.join(format!(".staging-{}", chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()));
-    let _ = std::fs::create_dir_all(&staging);
+    std::fs::create_dir_all(&staging).map_err(|e| format!("创建安装临时目录失败: {e}"))?;
 
     let result = (|| -> Result<InstallOutcome, String> {
         let kind = sniff_package_kind(&read_header(downloaded)?);
@@ -260,7 +260,6 @@ pub fn install_package(
         collect_all_files(&staging, &staging, &mut files);
 
         std::fs::create_dir_all(&game_dir).map_err(|e| e.to_string())?;
-        std::fs::rename(&staging, &package_dir).map_err(|e| format!("目录落位失败: {e}"))?;
 
         let manifest = TrainerManifest {
             schema: MANIFEST_SCHEMA.to_string(),
@@ -270,7 +269,8 @@ pub fn install_package(
             files,
         };
         let json = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
-        std::fs::write(package_dir.join(MANIFEST_FILE), json).map_err(|e| e.to_string())?;
+        std::fs::write(staging.join(MANIFEST_FILE), json).map_err(|e| e.to_string())?;
+        std::fs::rename(&staging, &package_dir).map_err(|e| format!("目录落位失败: {e}"))?;
         Ok(InstallOutcome {
             folder: package_dir,
             manifest,
@@ -540,6 +540,19 @@ mod tests {
         // 重复安装同包名 → 报错
         assert!(install_package(&dl, &meta("Test.Game.v1.0.Plus.13.Trainer-FLiNG"), &root, &sevenz_fixture()).is_err());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn manifest_failure_does_not_leave_a_published_package() {
+        let root = std::env::temp_dir().join(format!("gm-inst-manifest-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let dl = root.join("fixture.zip");
+        make_zip(&dl, &[("manifest.json/blocked.txt", b"fixture"), ("trainer.exe", b"MZfixture")]);
+        let result = install_package(&dl, &meta("manifest-failure"), &root, &sevenz_fixture());
+        assert!(result.is_err());
+        assert!(!root.join("Test Game Origins/manifest-failure").exists());
+        assert!(!std::fs::read_dir(&root).unwrap().flatten().any(|e| e.file_name().to_string_lossy().starts_with(".staging-")));
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

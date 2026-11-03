@@ -25,7 +25,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 STATE_DIR = ROOT.parent / ".workbuddy"
-DB = ROOT / "src-tauri" / "resources" / "database.db"
+DB = ROOT / "scripts" / "pcgw" / "database" / "gmc-dev-full.db"
 DEFAULT_LOG = STATE_DIR / "steam-names-run.log"
 STATE_FILE = STATE_DIR / "steam-watchdog.json"
 ACTION_LOG = STATE_DIR / "steam-watchdog.log"

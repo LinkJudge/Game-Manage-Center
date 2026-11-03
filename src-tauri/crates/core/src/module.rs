@@ -1,8 +1,7 @@
 //! 多模块管理抽象 —— Game Manage Center 的愿景：不只管理存档，还将管理修改器与 MOD。
 //!
 //! 预留方式：所有功能模块实现 [`GameModule`] 接口并向 [`modules`] 注册表登记。
-//! 当前 saves（存档）模块完整实现；trainers（修改器）目录检索已就位（下载/安装
-//! 尚未接入，implemented 仍为 false，UI 以 capabilities 探测可用能力）；
+//! 当前 saves（存档）与trainers（修改器）模块已实现；
 //! mods 为占位登记。后续能力就绪即在对应模块上追加 capability 标签。
 
 use serde::Serialize;

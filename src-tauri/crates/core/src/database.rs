@@ -48,7 +48,7 @@ pub struct GameEntry {
     pub gog_id: Option<String>,
     pub platforms: Vec<String>,
     pub zh_cn: Option<String>,
-    /// 繁体中文名（Steam 官方 l=tchinese）；缺省时前端回退到 zh_cn
+    /// 繁体中文名（Steam 官方 l=tchinese）；缺省时繁体界面回退英文
     pub zh_hant: Option<String>,
     pub paths: SaveLocations,
 }
@@ -140,6 +140,24 @@ impl Database {
             .map_err(|e| e.to_string())
     }
 
+    /// 在激活下载库或用户库之前验证完整读取契约，拒绝旧结构与缺列的库。
+    pub fn validate_catalog(&self) -> Result<i64, String> {
+        let integrity: String = self.conn.query_row("PRAGMA quick_check(1)", [], |row| row.get(0))
+            .map_err(|e| format!("数据库完整性检查失败: {e}"))?;
+        if integrity != "ok" {
+            return Err(format!("数据库损坏: {integrity}"));
+        }
+        self.conn.prepare(&format!("{SELECT_COLUMNS} LIMIT 0"))
+            .map_err(|e| format!("数据库结构不兼容，需要 gm.catalog/1 的游戏与简繁名称字段: {e}"))?;
+        let count = self.total_games()?;
+        if count == 0 {
+            return Err("数据库为空".to_string());
+        }
+        // 实读一行，避免字段虽存在但数据类型不符合读取契约。
+        self.list_games(None, 1, 0)?;
+        Ok(count)
+    }
+
     /// 按标题（含中文名）模糊搜索，分页返回
     pub fn list_games(
         &self,
@@ -163,6 +181,7 @@ impl Database {
         let sql = format!(
             "{SELECT_COLUMNS} WHERE name_en LIKE ?3 ESCAPE '\\' \
              OR name_zh LIKE ?3 ESCAPE '\\' \
+             OR name_zh_hant LIKE ?3 ESCAPE '\\' \
              ORDER BY name_en COLLATE NOCASE LIMIT ?1 OFFSET ?2"
         );
         let mut stmt = self.conn.prepare(&sql).map_err(|e| e.to_string())?;
@@ -399,5 +418,28 @@ mod tests {
             .unwrap_or(-1);
         // 0 组也合法；关键是这条 GROUP BY 不报错、主键不冲突
         assert!(dup >= 0);
+    }
+}
+
+#[cfg(test)]
+mod schema_tests {
+    use super::*;
+    #[test]
+    fn catalog_validation_rejects_nonempty_legacy_schema() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE games(title TEXT); INSERT INTO games VALUES('Old game');").unwrap();
+        let db = Database { conn };
+        assert_eq!(db.total_games().unwrap(), 1);
+        assert!(db.validate_catalog().unwrap_err().contains("结构不兼容"));
+    }
+    #[test]
+    fn catalog_validation_and_traditional_search_accept_current_schema() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE games(id INTEGER PRIMARY KEY, pcgw_id INTEGER, name_en TEXT, name_zh TEXT, name_zh_hant TEXT, install_dir TEXT, steam_appid INTEGER, gog_appid INTEGER, save_paths TEXT, stores TEXT);").unwrap();
+        let db = Database { conn };
+        assert!(db.validate_catalog().is_err());
+        db.conn.execute("INSERT INTO games(pcgw_id,name_en,name_zh,name_zh_hant,save_paths,stores) VALUES(1,'Test','简体名','繁體名','{}','[]')", []).unwrap();
+        assert_eq!(db.validate_catalog().unwrap(), 1);
+        assert_eq!(db.list_games(Some("繁體名"),10,0).unwrap().len(), 1);
     }
 }

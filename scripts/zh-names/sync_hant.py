@@ -23,7 +23,7 @@ from pathlib import Path
 
 from zhconv import convert
 
-DB = Path(__file__).resolve().parents[2] / "src-tauri" / "resources" / "database.db"
+DB = Path(__file__).resolve().parents[2] / "scripts" / "pcgw" / "database" / "gmc-dev-full.db"
 
 
 def is_real_hant(text: str) -> bool:

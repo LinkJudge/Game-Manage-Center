@@ -23,7 +23,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_DB = ROOT / "src-tauri" / "resources" / "database.db"
+DEFAULT_DB = ROOT / "scripts" / "pcgw" / "database" / "gmc-dev-full.db"
 DEFAULT_OUT = ROOT.parent / ".workbuddy" / "zh-name-conflicts.csv"
 DIGITS = re.compile(r"^\D*(\d+)")
 CJK = re.compile(r"[\u3400-\u9fff]")

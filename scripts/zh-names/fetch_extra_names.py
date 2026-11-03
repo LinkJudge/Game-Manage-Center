@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import gzip
 import random
 import sqlite3
 import sys
@@ -26,9 +27,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import xiaoheihe_zh as core  # noqa: E402
+from collection_state import BudgetExceeded, DAILY_LIMIT, daily_usage, preflight, single_collector, validate_target
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_DB = ROOT / "src-tauri" / "resources" / "database.db"
+DEFAULT_DB = ROOT / "scripts" / "pcgw" / "database" / "gmc-dev-full.db"
 DEFAULT_HOT = ROOT.parent / ".workbuddy" / "steam-topsellers.json"
 
 SCHEMA = """
@@ -57,7 +59,14 @@ def main() -> int:
     parser.add_argument("--use-proxy", action="store_true",
                         help="走系统代理（默认直连；小黑盒是国内站，直连更安全）")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--preflight", action="store_true", help="只读自检，不联网")
     args = parser.parse_args()
+    args.db = validate_target(args.db)
+    if args.preflight:
+        print(json.dumps(preflight(args.db), ensure_ascii=False, indent=2))
+        return 0
+    if args.use_proxy:
+        raise ValueError("小黑盒采集只允许直连")
 
     if not args.db.exists():
         print(f"[错误] 找不到数据库：{args.db}")
@@ -67,7 +76,7 @@ def main() -> int:
         return 1
 
     blocked_at = core.read_block_marker()
-    if blocked_at and not args.force:
+    if blocked_at and not args.force and not args.dry_run:
         from datetime import timedelta
 
         wait_until = blocked_at + timedelta(hours=args.cooldown_hours)
@@ -78,9 +87,13 @@ def main() -> int:
     hot = json.loads(args.hot.read_text(encoding="utf-8"))
     rank = {str(item["appid"]): int(item["rank"]) for item in hot}
 
-    conn = sqlite3.connect(args.db)
-    conn.execute(SCHEMA)
-    conn.commit()
+    conn = sqlite3.connect(args.db.resolve().as_uri()+"?mode=ro", uri=True) if args.dry_run else sqlite3.connect(args.db)
+    if not args.dry_run:
+        if daily_usage(conn) >= DAILY_LIMIT:
+            raise BudgetExceeded("当天请求预算已耗尽，等待次日再采集")
+        conn.execute(SCHEMA)
+        conn.execute("CREATE TABLE IF NOT EXISTS xhh_extra_raw(steam_appid TEXT PRIMARY KEY,payload BLOB NOT NULL,fetched_at TEXT NOT NULL)")
+        conn.commit()
 
     db_appids: set[str] = set()
     for (sid,) in conn.execute(
@@ -122,11 +135,15 @@ def main() -> int:
         max_delay=args.max_delay,
         pause_every=tuple(args.pause_every),
         pause_range=tuple(args.pause_range),
-        use_proxy=args.use_proxy,
+        use_proxy=False, budget_db=args.db,
     )
     print("正在模拟浏览器访问站点（热身）……")
     try:
         session.warm_up()
+    except BudgetExceeded as error:
+        print(error)
+        conn.close()
+        return 4
     except core.Blocked as blocked:
         core.write_block_marker(str(blocked))
         print(f"[中止] 热身被拦：{blocked}")
@@ -163,7 +180,11 @@ def main() -> int:
         session.breathe()
         requests_made += 1
         try:
-            name = session.fetch_name(appid)
+            name, _name_en, payload = session.fetch_name(appid)
+        except BudgetExceeded as error:
+            print(error)
+            exit_code = 4
+            break
         except core.Blocked as blocked:
             core.write_block_marker(str(blocked))
             print(f"[{index}/{len(targets)}] {appid} -> 触发风控：{blocked}，立即中止")
@@ -175,6 +196,10 @@ def main() -> int:
             continue
 
         checked_at = datetime.now().isoformat(timespec="seconds")
+        if payload is not None:
+            conn.execute("INSERT INTO xhh_extra_raw VALUES(?,?,?) ON CONFLICT(steam_appid) DO UPDATE SET payload=excluded.payload,fetched_at=excluded.fetched_at",
+                         (appid,gzip.compress(json.dumps(payload,ensure_ascii=False).encode("utf-8")),checked_at))
+            conn.commit()
         if not name:
             missing += 1
             buf.append((appid, None, "no_name", rank[appid], checked_at))
@@ -201,4 +226,13 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        if any(flag in sys.argv for flag in ("--preflight","--dry-run","--help")):
+            code=main()
+        else:
+            with single_collector():
+                code=main()
+    except (RuntimeError,ValueError) as error:
+        print(f"[中止] {error}",file=sys.stderr)
+        code=4
+    sys.exit(code)

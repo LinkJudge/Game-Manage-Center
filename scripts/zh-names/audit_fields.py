@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-DB = ROOT / "src-tauri" / "resources" / "database.db"
+DB = ROOT / "scripts" / "pcgw" / "database" / "gmc-dev-full.db"
 
 CJK = re.compile(r"[\u4e00-\u9fff]")
 LAT = re.compile(r"[A-Za-z]")

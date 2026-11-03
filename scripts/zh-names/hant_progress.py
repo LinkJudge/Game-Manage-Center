@@ -3,7 +3,7 @@
 import sqlite3
 from pathlib import Path
 
-DB = Path(__file__).resolve().parents[2] / "src-tauri" / "resources" / "database.db"
+DB = Path(__file__).resolve().parents[2] / "scripts" / "pcgw" / "database" / "gmc-dev-full.db"
 c = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
 hant = c.execute(
     "SELECT COUNT(*) FROM steam_names WHERE name_zh_hant IS NOT NULL AND trim(name_zh_hant) <> ''"

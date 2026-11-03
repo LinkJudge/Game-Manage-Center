@@ -21,7 +21,7 @@ import sys
 from zhconv import convert
 from pathlib import Path
 
-DB = Path(__file__).resolve().parents[2] / "src-tauri" / "resources" / "database.db"
+DB = Path(__file__).resolve().parents[2] / "scripts" / "pcgw" / "database" / "gmc-dev-full.db"
 CJK = re.compile(r"[\u4e00-\u9fff]")
 
 SCHEMA = """

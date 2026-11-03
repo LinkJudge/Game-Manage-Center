@@ -35,11 +35,12 @@ import sys
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
+from collection_state import validate_target
 
 CJK = re.compile(r"[\u3400-\u9fff]")
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_DB = ROOT / "src-tauri" / "resources" / "database.db"
+DEFAULT_DB = ROOT / "scripts" / "pcgw" / "database" / "gmc-dev-full.db"
 BACKUP_DIR = ROOT.parent / ".workbuddy" / "database-backups"
 
 
@@ -235,6 +236,7 @@ def main() -> int:
         help="严格模式：清空原作者人工整理的中文名（默认保留作第三优先级兜底）",
     )
     args = parser.parse_args()
+    args.db = validate_target(args.db)
 
     if not args.db.exists():
         print(f"[错误] 找不到数据库：{args.db}")

@@ -25,6 +25,9 @@ const STORAGE_KEY = "gm-locale";
 type Dict = Record<string, string>;
 
 const baseZh: Dict = {
+  "error.title": "页面暂时无法显示",
+  "error.description": "可以切换到其他模块，或重试当前页面。",
+  "error.retry": "重试",
   "nav.saves": "存档",
   "nav.trainers": "修改器",
   "nav.settings": "设置",
@@ -92,6 +95,9 @@ const baseZh: Dict = {
 };
 
 const baseEn: Dict = {
+  "error.title": "This page could not be displayed",
+  "error.description": "You can switch modules or retry this page.",
+  "error.retry": "Retry",
   "nav.saves": "Saves",
   "nav.trainers": "Trainers",
   "nav.settings": "Settings",
@@ -166,7 +172,7 @@ const zh: Dict = { ...baseZh, ...savesZh, ...trainersZh, ...dialogsZh, ...settin
 const en: Dict = { ...baseEn, ...savesEn, ...trainersEn, ...dialogsEn, ...settingsEn };
 
 /** 繁体：以简体为底再覆盖转换结果，漏转的词条会自动回退到简体，不会显示键名 */
-const zhHant: Dict = { ...zh, ...zhHantLocale };
+const zhHant: Dict = { ...zh, ...zhHantLocale, "error.title": "頁面暫時無法顯示", "error.description": "可以切換到其他模組，或重試目前頁面。", "error.retry": "重試" };
 
 const DICTS: Record<Lang, Dict> = { zh, zhHant, en };
 
