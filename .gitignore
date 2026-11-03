@@ -61,3 +61,6 @@ src-tauri/resources/database.db
 
 # 内部文档：只在本地，不进公开仓库
 docs/项目演进-0.1到0.5.html
+
+# Release 模板（内部备忘，不入公开仓库）
+docs/release-template.md
