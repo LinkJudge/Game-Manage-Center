@@ -48,3 +48,13 @@ __pycache__/
 scripts/pcgw/node_modules
 scripts/pcgw/database/
 scripts/pcgw/.cache/
+
+# SQLite 运行时文件
+database.db-shm
+database.db-wal
+
+# WorkBuddy 工作区数据（日志/备份/画布，不入库）
+.workbuddy/
+
+# 数据库走 Release 资产分发（254 MB 超 GitHub 100 MB 单文件上限）
+src-tauri/resources/database.db
