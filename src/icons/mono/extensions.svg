@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+        
+
+        
+
+        <!-- 样式 A：经典扩展插头 -->
+        <g id="ext-style-plug">
+          <g transform="translate(256, 256) rotate(-45) translate(-256, -256)">
+            <rect x="196" y="96" width="28" height="76" rx="14" fill="currentColor" stroke="currentColor" stroke-width="2"/>
+            <rect x="288" y="96" width="28" height="76" rx="14" fill="currentColor" stroke="currentColor" stroke-width="2"/>
+            <path d="M 152 160 H 360 C 373.25 160 384 170.75 384 184 V 260 C 384 317.44 337.44 364 280 364 H 232 C 174.56 364 128 317.44 128 260 V 184 C 128 170.75 138.75 160 152 160 Z" 
+                  fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+            <rect x="168" y="200" width="176" height="108" rx="28" fill="currentColor" opacity="0.88"/>
+            <path d="M 256 226 V 282 M 228 254 H 284" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+            <path d="M 232 364 H 280 V 412 C 280 425.25 269.25 436 256 436 C 242.75 436 232 425.25 232 412 V 364 Z" fill="currentColor" stroke="currentColor" stroke-width="2"/>
+          </g>
+          <circle cx="352" cy="352" r="66" fill="currentColor" stroke="currentColor" stroke-width="3"/>
+          <path d="M 352 322 V 382 M 322 352 H 382" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+        </g>
+
+        <!-- 样式 B：经典单体拼图块 -->
+        <g id="ext-style-puzzle" style="display:none;">
+          <g transform="translate(256, 264) rotate(-8) translate(-256, -256)">
+            <rect x="148" y="148" width="216" height="216" rx="36" fill="currentColor" stroke="currentColor" stroke-width="2"/>
+            <circle cx="256" cy="140" r="36" fill="currentColor" stroke="currentColor" stroke-width="2"/>
+            <rect x="212" y="142" width="88" height="30" fill="currentColor"/>
+            <circle cx="372" cy="256" r="36" fill="currentColor" stroke="currentColor" stroke-width="2"/>
+            <rect x="340" y="212" width="30" height="88" fill="currentColor"/>
+            <rect x="192" y="192" width="128" height="128" rx="24" fill="currentColor" opacity="0.88"/>
+            <path d="M 256 224 V 288 M 224 256 H 288" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
+          </g>
+        </g>
+      </svg>

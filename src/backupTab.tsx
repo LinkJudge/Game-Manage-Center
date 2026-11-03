@@ -47,7 +47,7 @@ import { CoverPickerDialog } from "@/components/coverPickerDialog";
 import { useScanStore } from "@/store";
 import type { ConflictInfo, BatchResult, CoverFillSummary, CoverLookup, GameBackups, ScanOutput, ScannedGame } from "@/types";
 import { CustomGamesDialog } from "@/customGamesDialog";
-import { gameNamePair, useI18n } from "@/i18n";
+import { gameNamePair, useI18n, localeTag, errText } from "@/i18n";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -97,12 +97,12 @@ function PlatformBadges({ platforms }: { platforms: string[] }) {
 function formatDateParts(ms: number): { date: string; time: string } {
   const value = new Date(ms);
   return {
-    date: value.toLocaleDateString("zh-CN", {
+    date: value.toLocaleDateString(localeTag(), {
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
     }),
-    time: value.toLocaleTimeString("zh-CN", {
+    time: value.toLocaleTimeString(localeTag(), {
       hour: "2-digit",
       minute: "2-digit",
       hour12: false,
@@ -116,6 +116,7 @@ interface SaveRow {
   id: number;
   title: string;
   zhCn: string | null;
+  zhHant: string | null;
   scanned?: ScannedGame;
   backup?: GameBackups;
   backupCount: number;
@@ -189,7 +190,7 @@ export function BackupTab() {
         description: t("saves.toast.deepDoneDesc", { count: leftovers }),
       });
     },
-    onError: (e) => toast.error(t("saves.toast.deepFailed"), { description: String(e) }),
+    onError: (e) => toast.error(t("saves.toast.deepFailed"), { description: errText(e) }),
   });
 
 
@@ -206,7 +207,7 @@ export function BackupTab() {
       toast.success(t("saves.toast.backupDone"), { description: instancePath });
       invalidateAfterBackup(id);
     },
-    onError: (e) => toast.error(t("saves.toast.backupFailed"), { description: String(e) }),
+    onError: (e) => toast.error(t("saves.toast.backupFailed"), { description: errText(e) }),
   });
 
   // 批量备份：单条 Rust 命令（一次 IPC，Rust 侧顺序执行，单个失败不中断）
@@ -225,7 +226,7 @@ export function BackupTab() {
       setSelected(new Set());
       invalidateAfterBackup();
     },
-    onError: (e) => toast.error(t("saves.toast.batchBackupFailed"), { description: String(e) }),
+    onError: (e) => toast.error(t("saves.toast.batchBackupFailed"), { description: errText(e) }),
   });
 
   // 批量恢复：每个游戏恢复其最新备份；本地较新的自动跳过
@@ -244,7 +245,7 @@ export function BackupTab() {
       setSelected(new Set());
       invalidateAfterBackup();
     },
-    onError: (e) => toast.error(t("saves.toast.batchRestoreFailed"), { description: String(e) }),
+    onError: (e) => toast.error(t("saves.toast.batchRestoreFailed"), { description: errText(e) }),
   });
 
   // 右键菜单 / 行操作：恢复最新备份（先查冲突）
@@ -267,7 +268,7 @@ export function BackupTab() {
     },
     onError: (e) => {
       if (String(e).includes("CONFLICT")) return;
-      toast.error(t("saves.toast.restoreFailed"), { description: String(e) });
+      toast.error(t("saves.toast.restoreFailed"), { description: errText(e) });
     },
   });
 
@@ -292,7 +293,7 @@ export function BackupTab() {
           }
         });
       })
-      .catch((e) => toast.error(t("saves.toast.opFailed"), { description: String(e) }));
+      .catch((e) => toast.error(t("saves.toast.opFailed"), { description: errText(e) }));
   };
 
   const toggleSelect = (id: number, checked: boolean) => {
@@ -352,6 +353,7 @@ export function BackupTab() {
       id,
       title: game.entry.title,
       zhCn: game.entry.zhCn,
+      zhHant: game.entry.zhHant ?? null,
       scanned: game,
       backup,
       backupCount: backup?.backups.length ?? backupCounts.data?.[String(id)] ?? 0,
@@ -373,6 +375,7 @@ export function BackupTab() {
       id: game.pcgwId,
       title: game.title,
       zhCn: game.zhCn,
+      zhHant: game.zhHant ?? null,
       backup: game,
       backupCount: game.backups.length,
       backupSize: game.backupSize,
@@ -412,7 +415,7 @@ export function BackupTab() {
         icon: FolderOpen,
         onSelect: () => {
           invoke("open_game_backup_folder", { pcgwId: row.id }).catch((e) =>
-            toast.error(t("saves.toast.openFailed"), { description: String(e) }),
+            toast.error(t("saves.toast.openFailed"), { description: errText(e) }),
           );
         },
       });
@@ -428,7 +431,7 @@ export function BackupTab() {
           icon: FolderOpen,
           onSelect: () => {
             invoke("open_save_folder", { path: savesPath }).catch((e) =>
-              toast.error(t("saves.toast.openFailed"), { description: String(e) }),
+              toast.error(t("saves.toast.openFailed"), { description: errText(e) }),
             );
           },
         });
@@ -439,7 +442,7 @@ export function BackupTab() {
           icon: FolderOpen,
           onSelect: () => {
             invoke("open_save_folder", { path: configPath }).catch((e) =>
-              toast.error(t("saves.toast.openFailed"), { description: String(e) }),
+              toast.error(t("saves.toast.openFailed"), { description: errText(e) }),
             );
           },
         });
@@ -482,7 +485,7 @@ export function BackupTab() {
           );
         }
       })
-      .catch((e) => toast.error(t("saves.toast.coverFailed"), { description: String(e) }))
+      .catch((e) => toast.error(t("saves.toast.coverFailed"), { description: errText(e) }))
       .finally(() => setFillingCovers(false));
   };
 
@@ -597,7 +600,7 @@ export function BackupTab() {
                 const backupStamp = formatBackupStamp(row.latestBackup);
                 const [backupDate, backupTime] =
                   backupStamp === "—" ? ["—", ""] : backupStamp.split(" ");
-                const namePair = gameNamePair(row.title, row.zhCn, lang);
+                const namePair = gameNamePair(row.title, row.zhCn, lang, row.zhHant);
                 const displayName = namePair.main;
                 const subtitle = [
                   namePair.sub,
@@ -954,5 +957,5 @@ export function BackupTab() {
 
 function formatMs(ms: number | null): string {
   if (!ms) return "—";
-  return new Date(ms).toLocaleString("zh-CN", { dateStyle: "short", timeStyle: "short" });
+  return new Date(ms).toLocaleString(localeTag(), { dateStyle: "short", timeStyle: "short" });
 }

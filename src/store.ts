@@ -1,4 +1,4 @@
-import { translate } from "@/i18n";
+import { translate, errText } from "@/i18n";
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { invoke } from "@tauri-apps/api/core";
@@ -57,7 +57,7 @@ export const useScanStore = create<ScanStore>()(
           set({ scanOutput: { ...out, deep: false }, scannedAt: Date.now(), scanning: false });
         } catch (e) {
           set({ scanning: false });
-          toast.error(translate("store.scanFailed"), { description: String(e) });
+          toast.error(translate("store.scanFailed"), { description: errText(e) });
         }
       },
     }),

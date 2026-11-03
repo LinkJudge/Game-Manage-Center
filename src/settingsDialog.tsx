@@ -3,26 +3,28 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import {
-  Archive,
-  Blocks,
   Cloud,
   DatabaseZap,
   Download,
   ExternalLink,
   FolderOpen,
-  Gamepad2,
-  Info,
   Loader2,
-  Puzzle,
   RefreshCw,
   ShieldCheck,
-  SlidersHorizontal,
   Trash2,
   UploadCloud,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ActionTooltip } from "@/components/ui/tooltip";
-import { setLocaleSetting, useI18n } from "@/i18n";
+import {
+  LineAbout,
+  LineExtensions,
+  LineMod,
+  LineSave,
+  LineSettings,
+  LineTrainer,
+} from "@/components/lineIcon";
+import { setLocaleSetting, useI18n, errText } from "@/i18n";
 import {
   Dialog,
   DialogContent,
@@ -62,24 +64,50 @@ type SettingsTab = "general" | "saves" | "trainers" | "extensions" | "mods" | "a
 const SETTINGS_TABS: {
   id: SettingsTab;
   label: string;
-  icon: typeof SlidersHorizontal;
+  icon: React.ComponentType<{ className?: string }>;
   disabled?: boolean;
   title?: string;
 }[] = [
-  { id: "general", label: "settings.tab.general", icon: SlidersHorizontal },
-  { id: "saves", label: "settings.tab.saves", icon: Archive },
-  { id: "trainers", label: "settings.tab.trainers", icon: Gamepad2 },
-  { id: "extensions", label: "settings.tab.extensions", icon: Blocks },
-  { id: "mods", label: "MOD", icon: Puzzle, disabled: true, title: "app.mod.planned" },
-  { id: "about", label: "settings.tab.about", icon: Info },
+  { id: "general", label: "settings.tab.general", icon: LineSettings },
+  { id: "saves", label: "settings.tab.saves", icon: LineSave },
+  { id: "trainers", label: "settings.tab.trainers", icon: LineTrainer },
+  { id: "mods", label: "settings.tab.mods", icon: LineMod },
+  { id: "extensions", label: "settings.tab.extensions", icon: LineExtensions },
+  { id: "about", label: "settings.tab.about", icon: LineAbout },
 ];
 
 /** 分区页头 */
-function PaneHeader({ title, description }: { title: string; description: string }) {
+function PaneHeader({
+  title,
+  description,
+  icon: Icon,
+  iconSrc,
+}: {
+  title: string;
+  description: string;
+  icon: React.ComponentType<{ className?: string }>;
+  /** 有彩色图标就用它（与主界面模块图标同一套资源），没有就退回单色线性图标 */
+  iconSrc?: string;
+}) {
   return (
-    <div className="mb-4">
-      <h2 className="text-lg font-semibold">{title}</h2>
-      <p className="text-xs text-muted-foreground">{description}</p>
+    <div className="mb-4 flex items-center gap-3">
+      <span
+        className={
+          iconSrc
+            ? "grid size-[2.3rem] shrink-0 place-items-center"
+            : "grid size-[2.2rem] shrink-0 place-items-center rounded-[0.72rem] border bg-card/70 text-foreground/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] dark:bg-white/[0.06] dark:shadow-none"
+        }
+      >
+        {iconSrc ? (
+          <img src={iconSrc} alt="" className="size-[2.3rem] rounded-[0.7rem]" />
+        ) : (
+          <Icon className="size-[1.25rem]" />
+        )}
+      </span>
+      <div className="min-w-0">
+        <h2 className="text-lg font-semibold leading-tight">{title}</h2>
+        <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+      </div>
     </div>
   );
 }
@@ -275,7 +303,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         toast.success(t("settings.toast.dbUpdated", { count: r.count.toLocaleString() }));
         queryClient.invalidateQueries({ queryKey: ["save-database-info"] });
       })
-      .catch((e) => toast.error(t("settings.toast.dbUpdateFailed"), { description: String(e) }))
+      .catch((e) => toast.error(t("settings.toast.dbUpdateFailed"), { description: errText(e) }))
       .finally(() => setUpdatingDb(false));
   };
   const [addingDefender, setAddingDefender] = useState(false);
@@ -295,7 +323,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         setMigrateAsk(next);
       }
     },
-    onError: (e) => toast.error(t("settings.toast.saveFailed"), { description: String(e) }),
+    onError: (e) => toast.error(t("settings.toast.saveFailed"), { description: errText(e) }),
   });
 
   const browse = async () => {
@@ -322,7 +350,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       queryClient.invalidateQueries({ queryKey: ["settings"] });
       queryClient.invalidateQueries({ queryKey: ["all-backups"] });
     },
-    onError: (e) => toast.error(t("settings.toast.migrateFailed"), { description: String(e) }),
+    onError: (e) => toast.error(t("settings.toast.migrateFailed"), { description: errText(e) }),
   });
 
   const toggleAutostart = useMutation({
@@ -331,7 +359,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       queryClient.invalidateQueries({ queryKey: ["autostart"] });
       toast.success(enabled ? t("settings.toast.autostartOn") : t("settings.toast.autostartOff"));
     },
-    onError: (e) => toast.error(t("saves.toast.opFailed"), { description: String(e) }),
+    onError: (e) => toast.error(t("saves.toast.opFailed"), { description: errText(e) }),
   });
 
   // 修改器目录在线更新：下载 → 校验通过才落盘 → 重载
@@ -343,7 +371,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
           description: r.generatedAt ? t("settings.toast.catalogGeneratedAt", { date: r.generatedAt.slice(0, 10) }) : undefined,
         }),
       )
-      .catch((e) => toast.error(t("settings.toast.catalogUpdateFailed"), { description: String(e) }))
+      .catch((e) => toast.error(t("settings.toast.catalogUpdateFailed"), { description: errText(e) }))
       .finally(() => setUpdatingCatalog(false));
   };
 
@@ -355,7 +383,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         clearCoverMemoryCache();
         toast.success(count > 0 ? t("settings.toast.coverCleared", { count }) : t("settings.toast.coverNone"));
       })
-      .catch((e) => toast.error(t("settings.toast.clearFailed"), { description: String(e) }))
+      .catch((e) => toast.error(t("settings.toast.clearFailed"), { description: errText(e) }))
       .finally(() => setClearingCovers(false));
   };
 
@@ -378,28 +406,28 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         markUpdateChecked();
         setUpdateResult(r);
       })
-      .catch((e) => toast.error(t("settings.toast.checkUpdateFailed"), { description: String(e) }))
+      .catch((e) => toast.error(t("settings.toast.checkUpdateFailed"), { description: errText(e) }))
       .finally(() => setUpdatingApp(false));
   };
 
   const openProjectPage = () => {
     import("@tauri-apps/plugin-opener").then(({ openUrl }) =>
       openUrl("https://github.com/LinkJudge/Game-Manage-Center").catch((e) =>
-        toast.error(t("settings.toast.openFailed"), { description: String(e) }),
+        toast.error(t("settings.toast.openFailed"), { description: errText(e) }),
       ),
     );
   };
 
   const openReleasePage = (url: string) => {
     import("@tauri-apps/plugin-opener").then(({ openUrl }) =>
-      openUrl(url).catch((e) => toast.error(t("settings.toast.openFailed"), { description: String(e) })),
+      openUrl(url).catch((e) => toast.error(t("settings.toast.openFailed"), { description: errText(e) })),
     );
   };
 
   const openSgdbKeys = () => {
     import("@tauri-apps/plugin-opener").then(({ openUrl }) =>
       openUrl("https://www.steamgriddb.com/profile/preferences/api").catch((e) =>
-        toast.error(t("settings.toast.openFailed"), { description: String(e) }),
+        toast.error(t("settings.toast.openFailed"), { description: errText(e) }),
       ),
     );
   };
@@ -447,7 +475,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                       : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
                   } ${item.disabled ? "cursor-not-allowed opacity-50" : ""}`}
                 >
-                  <Icon className="size-4 shrink-0" />
+                  <Icon className="size-[1.15rem] shrink-0" />
                   {t(item.label)}
                 </button>
               );
@@ -465,7 +493,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
           <div className="min-w-0 flex-1 overflow-y-auto p-6 pt-9">
             {tab === "general" && (
               <div>
-                <PaneHeader title={t("settings.general.title")} description={t("settings.general.desc")} />
+                <PaneHeader title={t("settings.general.title")} description={t("settings.general.desc")} icon={LineSettings} />
                 <RowCard>
                   <Row
                     label={t("settings.language.label")}
@@ -474,7 +502,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                       <Select
                         value={localeSetting}
                         onValueChange={(v) => {
-                          setLocaleSetting(v as "system" | "zh" | "en");
+                          setLocaleSetting(v as "system" | "zh" | "zhHant" | "en");
                           save.mutate({ locale: v === "system" ? "" : v });
                         }}
                       >
@@ -484,6 +512,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                         <SelectContent>
                           <SelectItem value="system">{t("settings.language.system")}</SelectItem>
                           <SelectItem value="zh">简体中文</SelectItem>
+                          <SelectItem value="zhHant">繁體中文</SelectItem>
                           <SelectItem value="en">English</SelectItem>
                         </SelectContent>
                       </Select>
@@ -594,9 +623,21 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
               </div>
             )}
 
+            {tab === "mods" && (
+              <div>
+                <PaneHeader title={t("settings.mods.title")} description={t("settings.mods.desc")} icon={LineMod} />
+                <div className="rounded-2xl border border-dashed bg-card/40 px-6 py-14 text-center">
+                  <LineMod className="mx-auto mb-3 size-8 text-muted-foreground/60" />
+                  <p className="mx-auto max-w-sm text-xs leading-relaxed text-muted-foreground">
+                    {t("settings.mods.planned")}
+                  </p>
+                </div>
+              </div>
+            )}
+
             {tab === "extensions" && (
               <div>
-                <PaneHeader title={t("settings.extensions.title")} description={t("settings.extensions.desc")} />
+                <PaneHeader title={t("settings.extensions.title")} description={t("settings.extensions.desc")} icon={LineExtensions} />
                 <div className="space-y-4">
                   {/* 云存档（WebDAV） */}
                   <div className="space-y-3 rounded-2xl border bg-card p-4">
@@ -770,14 +811,14 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
 
             {tab === "saves" && (
               <div>
-                <PaneHeader title={t("settings.saves.title")} description={t("settings.saves.desc")} />
+                <PaneHeader title={t("settings.saves.title")} description={t("settings.saves.desc")} icon={LineSave} />
                 <div className="space-y-4 rounded-2xl border bg-card p-4">
                   <div className="space-y-1.5">
                     <Label>{t("settings.saves.pathLabel")}</Label>
                     <p className="text-xs text-muted-foreground">{t("settings.saves.pathHint")}</p>
                     <div className="flex gap-2">
                       <Input value={backupPath} onChange={(e) => setBackupPath(e.target.value)}
-                        onBlur={() => save.mutate({ backupPath: backupPath.trim() })} className="text-xs" placeholder="默认位置" />
+                        onBlur={() => save.mutate({ backupPath: backupPath.trim() })} className="text-xs" placeholder={t("settings.saves.placeholder")} />
                       <Button variant="outline" size="sm" onClick={browse} className="shrink-0">
                         <FolderOpen className="mr-1 size-4" />
                         {t("settings.saves.browse")}
@@ -889,7 +930,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
 
             {tab === "trainers" && (
               <div>
-                <PaneHeader title={t("settings.trainers.title")} description={t("settings.trainers.desc")} />
+                <PaneHeader title={t("settings.trainers.title")} description={t("settings.trainers.desc")} icon={LineTrainer} />
                 <div className="space-y-4 rounded-2xl border bg-card p-4">
                   <div className="space-y-1.5">
                     <Label>{t("settings.trainers.pathLabel")}</Label>
@@ -898,7 +939,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
                     </p>
                     <div className="flex gap-2">
                       <Input value={trainerPath} onChange={(e) => setTrainerPath(e.target.value)}
-                        onBlur={() => save.mutate({ trainerPath: trainerPath.trim() })} className="text-xs" placeholder="默认位置" />
+                        onBlur={() => save.mutate({ trainerPath: trainerPath.trim() })} className="text-xs" placeholder={t("settings.saves.placeholder")} />
                       <Button variant="outline" size="sm" onClick={browseTrainer} className="shrink-0">
                         <FolderOpen className="mr-1 size-4" />
                         {t("settings.saves.browse")}
@@ -941,7 +982,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
 
             {tab === "about" && (
               <div>
-                <PaneHeader title={t("settings.about.title")} description={t("settings.about.desc")} />
+                <PaneHeader title={t("settings.about.title")} description={t("settings.about.desc")} icon={LineAbout} />
                 <div className="space-y-4">
                   {/* 品牌行 */}
                   <div className="flex items-center gap-4 rounded-2xl border bg-card p-4">

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+        
+        
+        <g>
+          <path d="M144 108 H316 L368 160 V364 C368 381.67 353.67 396 336 396 H144 C126.33 396 112 381.67 112 364 V140 C112 122.33 126.33 108 144 108 Z" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+          <path d="M172 108 H292 V180 C292 188.84 284.84 196 276 196 H188 C179.16 196 172 188.84 172 180 V108 Z" fill="currentColor" opacity="0.85"/>
+          <rect x="242" y="124" width="28" height="52" rx="6" fill="currentColor"/>
+          <rect x="152" y="244" width="176" height="120" rx="16" fill="currentColor" opacity="0.9"/>
+          <line x1="180" y1="280" x2="276" y2="280" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+          <line x1="180" y1="312" x2="244" y2="312" stroke="currentColor" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
+          <circle cx="348" cy="348" r="68" fill="currentColor" stroke="currentColor" stroke-width="3"/>
+          <path d="M316 336 A34 34 0 0 1 376 328" fill="currentColor" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+          <polygon points="382,314 386,340 362,334" fill="currentColor"/>
+          <path d="M380 360 A34 34 0 0 1 320 368" fill="currentColor" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+          <polygon points="314,382 310,356 334,362" fill="currentColor"/>
+        </g>
+      </svg>

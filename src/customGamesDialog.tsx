@@ -1,4 +1,4 @@
-import { useI18n } from "@/i18n";
+import { useI18n, errText } from "@/i18n";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
@@ -80,7 +80,7 @@ export function CustomGamesDialog({
       setPaths([{ kind: "folder", path: "" }]);
       void games;
     },
-    onError: (e) => toast.error(t("dialogs.custom.saveFailed"), { description: String(e) }),
+    onError: (e) => toast.error(t("dialogs.custom.saveFailed"), { description: errText(e) }),
   });
 
   const removeExisting = (id: number) => {

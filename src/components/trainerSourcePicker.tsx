@@ -13,6 +13,7 @@ import {
 import { compareTrainerHits, TrainerSourceBadge } from "@/components/trainerSource";
 import { ACTION_COPY } from "@/lib/actionCopy";
 import type { TrainerHit } from "@/types";
+import { trainerNameParts } from "@/lib/trainerName";
 
 function formatBytes(bytes: number | null): string {
   if (bytes == null) return translate("dialogs.source.sizeUnknown");
@@ -34,7 +35,7 @@ export function TrainerSourcePicker({
   onOpenChange: (open: boolean) => void;
   onChoose: (hit: TrainerHit) => void;
 }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
 
   const ordered = [...hits].sort(compareTrainerHits);
 
@@ -67,7 +68,7 @@ export function TrainerSourcePicker({
                   <div className="flex flex-wrap items-center gap-2">
                     <TrainerSourceBadge sourceId={hit.sourceId} />
                     <span className="text-sm font-semibold tracking-[-0.01em]">
-                      {hit.zhName ?? hit.gameName}
+                      {trainerNameParts(hit, lang).main}
                     </span>
                     <Badge variant="secondary" className="text-[10px]">
                       {external ? t("dialogs.source.manual") : t("dialogs.source.oneClick")}

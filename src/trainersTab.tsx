@@ -7,7 +7,6 @@ import {
   Download,
   ExternalLink,
   FolderOpen,
-  Gamepad2,
   ImagePlus,
   Layers3,
   Loader2,
@@ -50,7 +49,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useScanStore, useTrainerStore } from "@/store";
-import { gameName, gameNamePair, resolveLang, translate, useI18n } from "@/i18n";
+import { gameName, gameNamePair, resolveLang, translate, useI18n, localeTag, errText } from "@/i18n";
+import { LineTrainer } from "@/components/lineIcon";
+import { trainerNameParts } from "@/lib/trainerName";
 import type {
   CoverFillSummary,
   CoverLookup,
@@ -74,14 +75,14 @@ function formatBytes(bytes: number | null): string {
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString("zh-CN");
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString(localeTag());
 }
 
 // 来源显示名（新增来源时在此补一行；UI 层预留，来源自身的 title 是英文名）
 function openExternalLink(url: string) {
   import("@tauri-apps/plugin-opener")
     .then(({ openUrl }) => openUrl(url))
-    .catch((e) => toast.error(translate("trainers.toast.openFailed"), { description: String(e) }));
+    .catch((e) => toast.error(translate("trainers.toast.openFailed"), { description: errText(e) }));
 }
 
 const DOWNLOAD_CANCELLED = "__TRAINER_DOWNLOAD_CANCELLED__";
@@ -135,17 +136,26 @@ interface ResultRow {
 function rowName(row: ResultRow): string {
   if (row.displayName) return row.displayName;
   const lang = resolveLang();
-  if (row.hit) return gameNamePair(row.hit.gameName, row.hit.zhName, lang).main;
-  const m = row.installedOf?.manifest;
-  return m ? gameNamePair(m.gameName, m.zhName, lang).main : "—";
+  if (row.hit) return trainerNameParts(row.hit, lang).main;
+  const t = row.installedOf;
+  return t
+    ? trainerNameParts(
+        { ...t.manifest, zhNameResolved: t.zhNameResolved, zhHantResolved: t.zhHantResolved },
+        lang,
+      ).main
+    : "—";
 }
 
 function rowSub(row: ResultRow): string {
   if (row.subline) return row.subline;
   const lang = resolveLang();
-  const m = row.installedOf?.manifest;
-  if (row.hit) return gameNamePair(row.hit.gameName, row.hit.zhName, lang).sub ?? "";
-  if (m) return gameNamePair(m.gameName, m.zhName, lang).sub ?? "";
+  const t = row.installedOf;
+  if (row.hit) return trainerNameParts(row.hit, lang).sub ?? "";
+  if (t)
+    return trainerNameParts(
+      { ...t.manifest, zhNameResolved: t.zhNameResolved, zhHantResolved: t.zhHantResolved },
+      lang,
+    ).sub ?? "";
   return "";
 }
 
@@ -404,7 +414,7 @@ export function TrainersTab() {
           if (seq === searchSeq.current) setHits(hits);
         })
         .catch((e) => {
-          if (seq === searchSeq.current) toast.error(tr("trainers.toast.searchFailed"), { description: String(e) });
+          if (seq === searchSeq.current) toast.error(tr("trainers.toast.searchFailed"), { description: errText(e) });
         })
         .finally(() => {
           if (seq === searchSeq.current) setSearching(false);
@@ -468,7 +478,7 @@ export function TrainersTab() {
         if (String(e).includes(DOWNLOAD_CANCELLED)) {
           toast.info(tr("trainers.toast.cancelled"), { description: hit.gameName });
         } else {
-          toast.error(tr("trainers.toast.downloadFailed"), { description: String(e) });
+          toast.error(tr("trainers.toast.downloadFailed"), { description: errText(e) });
         }
         setProgress((prev) => {
           const next = { ...prev };
@@ -512,7 +522,7 @@ export function TrainersTab() {
               [trainerId]: { ...current, stage: "download" },
             };
           });
-          toast.error(tr("trainers.toast.cancelFailed"), { description: String(e) });
+          toast.error(tr("trainers.toast.cancelFailed"), { description: errText(e) });
         });
     };
     requestCancel(0);
@@ -554,7 +564,7 @@ export function TrainersTab() {
             description: gameName(u.gameName, u.zhName, lang),
           });
         } else {
-          toast.error(tr("trainers.toast.updateFailed"), { description: String(e) });
+          toast.error(tr("trainers.toast.updateFailed"), { description: errText(e) });
         }
         setProgress((prev) => {
           const next = { ...prev };
@@ -566,13 +576,13 @@ export function TrainersTab() {
 
   const launch = (t: InstalledTrainer) => {
     invoke("launch_installed_trainer", { folder: t.folder }).catch((e) =>
-      toast.error(tr("trainers.toast.launchFailed"), { description: String(e) }),
+      toast.error(tr("trainers.toast.launchFailed"), { description: errText(e) }),
     );
   };
 
   const openFolder = (t: InstalledTrainer) => {
     invoke("open_save_folder", { path: t.folder }).catch((e) =>
-      toast.error(tr("trainers.toast.openFailed"), { description: String(e) }),
+      toast.error(tr("trainers.toast.openFailed"), { description: errText(e) }),
     );
   };
 
@@ -585,7 +595,7 @@ export function TrainersTab() {
         toast.success(tr("trainers.toast.deleted"), { description: t.manifest.gameName });
         refreshInstalled();
       })
-      .catch((e) => toast.error(tr("trainers.toast.deleteFailed"), { description: String(e) }));
+      .catch((e) => toast.error(tr("trainers.toast.deleteFailed"), { description: errText(e) }));
   };
 
   const toggleSelect = (key: string, checked: boolean) => {
@@ -886,7 +896,7 @@ export function TrainersTab() {
           );
         }
       })
-      .catch((e) => toast.error(tr("trainers.toast.coverFailed"), { description: String(e) }))
+      .catch((e) => toast.error(tr("trainers.toast.coverFailed"), { description: errText(e) }))
       .finally(() => setFillingCovers(false));
   };
 
@@ -990,14 +1000,13 @@ export function TrainersTab() {
                   cur.titles.push(src.title);
                   fam.set(key, cur);
                 }
-                return Array.from(fam.entries()).map(([id, info]) => {
+                return Array.from(fam.entries()).map(([id]) => {
                   const active = sourceFilter === id;
                   const label = tr(`trainers.family.${id}`);
                   return (
                     <button
                       key={id}
                       type="button"
-                      title={info.titles.join(" + ") + `（${info.count}）`}
                       onClick={() => setSourceFilter(active ? "all" : id)}
                       className={`rounded-[0.55rem] px-2 py-1 text-xs transition-colors ${
                         active
@@ -1300,7 +1309,7 @@ export function TrainersTab() {
         </Card>
       ) : (
         <Card className="flex h-48 flex-col items-center justify-center gap-3 text-muted-foreground">
-          <Gamepad2 className="size-8" />
+          <LineTrainer className="size-8" />
           <p>{tr("trainers.empty.hint")}</p>
         </Card>
       )}

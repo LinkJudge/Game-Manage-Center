@@ -47,7 +47,25 @@ const en: Copy = {
   updateTrainer: { short: "Update", full: "Update to the latest version" },
 };
 
-const DICTS: Record<string, Copy> = { zh, en };
+const zhHant: Copy = {
+  backup: { short: "備份", full: "備份此遊戲存檔" },
+  restoreLatest: { short: "還原", full: "還原最新備份" },
+  manageBackups: { short: "記錄", full: "管理備份記錄" },
+  openBackupFolder: { short: "備份目錄", full: "開啟備份資料夾" },
+  openSaveFolder: { short: "存檔目錄", full: "開啟存檔資料夾" },
+  openConfigFolder: { short: "設定目錄", full: "開啟設定資料夾" },
+  changeCover: { short: "更換圖示", full: "更換遊戲圖示" },
+  launchTrainer: { short: "啟動", full: "啟動修改器" },
+  openTrainerFolder: { short: "目錄", full: "開啟修改器目錄" },
+  deleteTrainer: { short: "刪除", full: "刪除修改器" },
+  chooseSource: { short: "選擇來源", full: "選擇來源下載" },
+  downloadTrainer: { short: "下載", full: "下載並安裝修改器" },
+  cancelDownload: { short: "取消", full: "取消下載" },
+  externalTrainer: { short: "官網取得", full: "開啟官方下載頁" },
+  updateTrainer: { short: "更新", full: "更新到最新版本" },
+};
+
+const DICTS: Record<string, Copy> = { zh, zhHant, en };
 
 export const ACTION_COPY = new Proxy({} as Copy, {
   get(_target, prop: string) {

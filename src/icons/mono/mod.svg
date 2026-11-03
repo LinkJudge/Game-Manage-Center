@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+        
+        
+        <g>
+          <rect x="112" y="132" width="124" height="124" rx="26" fill="currentColor" stroke="currentColor" stroke-width="2"/>
+          <rect x="112" y="276" width="124" height="124" rx="26" fill="currentColor" stroke="currentColor" stroke-width="2"/>
+          <rect x="256" y="276" width="124" height="124" rx="26" fill="currentColor" stroke="currentColor" stroke-width="2"/>
+          <circle cx="174" cy="266" r="20" fill="currentColor"/>
+          <circle cx="246" cy="338" r="20" fill="currentColor"/>
+          <g transform="translate(18, -18) rotate(8 320 180)">
+            <rect x="256" y="128" width="132" height="132" rx="30" fill="currentColor" stroke="currentColor" stroke-width="2"/>
+            <path d="M322 166 V222 M294 194 H350" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
+          </g>
+        </g>
+      </svg>

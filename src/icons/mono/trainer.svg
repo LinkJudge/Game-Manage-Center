@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+        
+        
+        <g>
+          <rect x="104" y="108" width="272" height="276" rx="36" fill="currentColor" stroke="currentColor" stroke-width="2"/>
+          <line x1="144" y1="168" x2="336" y2="168" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
+          <line x1="144" y1="168" x2="288" y2="168" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
+          <circle cx="288" cy="168" r="20" fill="currentColor" stroke="currentColor" stroke-width="2"/>
+          <line x1="144" y1="246" x2="336" y2="246" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
+          <line x1="144" y1="246" x2="204" y2="246" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
+          <circle cx="204" cy="246" r="20" fill="currentColor" stroke="currentColor" stroke-width="2"/>
+          <line x1="144" y1="324" x2="336" y2="324" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
+          <line x1="144" y1="324" x2="256" y2="324" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
+          <circle cx="256" cy="324" r="20" fill="currentColor" stroke="currentColor" stroke-width="2"/>
+          <circle cx="352" cy="344" r="70" fill="currentColor" stroke="currentColor" stroke-width="3"/>
+          <path d="M352 308 V372 M324 348 L352 376 L380 348" fill="currentColor" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
+      </svg>

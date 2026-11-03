@@ -1,4 +1,4 @@
-import { useI18n } from "@/i18n";
+import { useI18n, errText } from "@/i18n";
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
@@ -86,7 +86,7 @@ export function CoverPickerDialog({
         toast.success(t("dialogs.cover.updated"));
         onOpenChange(false);
       })
-      .catch((e) => toast.error(t("dialogs.cover.failed"), { description: String(e) }))
+      .catch((e) => toast.error(t("dialogs.cover.failed"), { description: errText(e) }))
       .finally(() => setApplying(false));
   };
 

@@ -14,8 +14,10 @@ import { savesEn, savesZh } from "@/locales/saves";
 import { trainersEn, trainersZh } from "@/locales/trainers";
 import { dialogsEn, dialogsZh } from "@/locales/dialogs";
 import { settingsEn, settingsZh } from "@/locales/settings";
+import { zhHant as zhHantLocale } from "@/locales/zhHant";
+import { rustEn, rustZhHant } from "@/locales/rustMessages";
 
-export type Lang = "zh" | "en";
+export type Lang = "zh" | "zhHant" | "en";
 export type LocaleSetting = "system" | Lang;
 
 const STORAGE_KEY = "gm-locale";
@@ -45,6 +47,13 @@ const baseZh: Dict = {
   "settings.tab.trainers": "修改器",
   "settings.tab.extensions": "扩展",
   "settings.tab.mods": "MOD",
+  "mods.title": "MOD",
+  "mods.subtitle": "安装、版本管理与冲突排查 · 功能规划中",
+  "mods.planned.title": "规划中",
+  "mods.planned.desc": "MOD 的安装、版本管理与冲突排查正在设计，后续版本开放。",
+  "settings.mods.title": "MOD",
+  "settings.mods.desc": "MOD 目录与加载相关设置",
+  "settings.mods.planned": "规划中：这里会放 MOD 目录位置、加载顺序、冲突提示等设置。",
   "settings.tab.about": "关于",
 
   "settings.general.title": "通用",
@@ -106,6 +115,13 @@ const baseEn: Dict = {
   "settings.tab.trainers": "Trainers",
   "settings.tab.extensions": "Extensions",
   "settings.tab.mods": "MODs",
+  "mods.title": "MODs",
+  "mods.subtitle": "Install, version management and conflict checks · planned",
+  "mods.planned.title": "Planned",
+  "mods.planned.desc": "MOD install, version management and conflict checks are being designed and will ship in a later release.",
+  "settings.mods.title": "MODs",
+  "settings.mods.desc": "MOD folder and loading options",
+  "settings.mods.planned": "Planned: MOD folder location, load order and conflict warnings will live here.",
   "settings.tab.about": "About",
 
   "settings.general.title": "General",
@@ -149,12 +165,15 @@ const baseEn: Dict = {
 const zh: Dict = { ...baseZh, ...savesZh, ...trainersZh, ...dialogsZh, ...settingsZh };
 const en: Dict = { ...baseEn, ...savesEn, ...trainersEn, ...dialogsEn, ...settingsEn };
 
-const DICTS: Record<Lang, Dict> = { zh, en };
+/** 繁体：以简体为底再覆盖转换结果，漏转的词条会自动回退到简体，不会显示键名 */
+const zhHant: Dict = { ...zh, ...zhHantLocale };
+
+const DICTS: Record<Lang, Dict> = { zh, zhHant, en };
 
 function readStored(): LocaleSetting {
   try {
     const value = localStorage.getItem(STORAGE_KEY);
-    if (value === "zh" || value === "en" || value === "system") return value;
+    if (value === "zh" || value === "zhHant" || value === "en" || value === "system") return value;
   } catch {
     // localStorage 不可用时按跟随系统处理
   }
@@ -184,11 +203,21 @@ function subscribe(callback: () => void): () => void {
   return () => listeners.delete(callback);
 }
 
-/** 把设置值解析成实际语言；system 用浏览器语言判断（中文系一律中文） */
+/** 把设置值解析成实际语言；system 用浏览器语言判断（zh-TW / zh-HK / zh-Hant 走繁体） */
 export function resolveLang(setting: LocaleSetting = current): Lang {
-  if (setting === "zh" || setting === "en") return setting;
+  if (setting === "zh" || setting === "zhHant" || setting === "en") return setting;
   const nav = typeof navigator === "undefined" ? "zh" : navigator.language || "zh";
-  return nav.toLowerCase().startsWith("zh") ? "zh" : "en";
+  const lower = nav.toLowerCase();
+  if (lower.startsWith("zh")) {
+    return /hant|tw|hk|mo/.test(lower) ? "zhHant" : "zh";
+  }
+  return "en";
+}
+
+/** 日期/数字格式化用的 BCP-47 标签：繁体模式用 zh-TW，别让日期还是简体格式 */
+export function localeTag(lang: Lang = resolveLang()): string {
+  if (lang === "en") return "en-US";
+  return lang === "zhHant" ? "zh-TW" : "zh-CN";
 }
 
 function format(template: string, vars?: Record<string, string | number>): string {
@@ -210,30 +239,72 @@ export function translate(
   return key;
 }
 
+const RUST_TABLES: Record<string, { table: Record<string, string>; keys: string[] }> = {
+  zhHant: {
+    table: rustZhHant,
+    keys: Object.keys(rustZhHant).sort((a, b) => b.length - a.length),
+  },
+  en: {
+    table: rustEn,
+    keys: Object.keys(rustEn).sort((a, b) => b.length - a.length),
+  },
+};
+
+/**
+ * 后端错误文案：按当前语言查表转换。
+ * Rust 的错误是硬编码简体中文（"恢复失败：..."），静态部分能翻，动态拼接的部分原样保留。
+ * 未登记的错误（日志类、测试断言）原样返回，不会显示成键名。
+ */
+export function errText(error: unknown): string {
+  const raw =
+    typeof error === "string" ? error : error instanceof Error ? error.message : String(error);
+  const lang = resolveLang();
+  const entry = RUST_TABLES[lang];
+  if (!entry) return raw;
+  const exact = entry.table[raw];
+  if (exact) return exact;
+  for (const key of entry.keys) {
+    if (key.length >= 3 && raw.startsWith(key)) {
+      return entry.table[key] + raw.slice(key.length);
+    }
+  }
+  return raw;
+}
+
 export function useLocaleSetting(): LocaleSetting {
   return useSyncExternalStore(subscribe, () => current, () => current);
 }
 
 /**
  * 游戏名的主副两行。
- * - 中文界面：中文名在前，英文原名作副标题
- * - **英文界面：只用英文原名，不显示中文副标题**（戢翎 2026-10-28 要求）
- * 数据库里的 title 永远是英文原名，zh_CN 可能为空或与原名相同。
+ *
+ * 回退规则（戢翎 2026-11-02 定）：
+ *   简体模式：name_zh → name_zh_hant → name_en
+ *   繁体模式：name_zh_hant → name_en（**不回退简体**，宁可显示英文）
+ *   英文模式：name_en
+ *
+ * 副标题：主名不是英文原名时，把英文原名放副标题；主名就是英文时不显示副标题
+ * （英文界面完全不显示副标题，戢翎 2026-10-28 要求）。
  */
 export function gameNamePair(
   title: string,
   zhName: string | null | undefined,
   lang: Lang,
+  zhHantName?: string | null,
 ): { main: string; sub: string | null } {
-  const zh = (zhName ?? "").trim();
   const en = (title ?? "").trim();
+  const zh = (zhName ?? "").trim();
+  const hant = (zhHantName ?? "").trim();
+
   if (lang === "en") {
-    return { main: en || zh, sub: null };
+    return { main: en || zh || hant, sub: null };
   }
-  if (!zh || zh.toLowerCase() === en.toLowerCase()) {
-    return { main: en || zh, sub: null };
+
+  const main = lang === "zhHant" ? hant || en : zh || hant || en;
+  if (!main || main.toLowerCase() === en.toLowerCase()) {
+    return { main: main || en, sub: null };
   }
-  return { main: zh, sub: en };
+  return { main, sub: en };
 }
 
 /** 只要显示名时的简写 */

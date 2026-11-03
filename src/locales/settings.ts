@@ -42,6 +42,7 @@ export const settingsZh: Record<string, string> = {
   "settings.saves.desc": "备份位置与轮换策略会立即影响后续备份操作",
   "settings.saves.pathLabel": "备份保存位置",
   "settings.saves.pathHint": "留空使用应用数据目录下的 Backups",
+  "settings.saves.placeholder": "默认位置",
   "settings.saves.browse": "浏览",
   "settings.saves.maxLabel": "滚动备份上限",
   "settings.saves.maxHint": "超出上限自动删除最旧备份；固定（Pin）的不受影响",
@@ -112,7 +113,7 @@ export const settingsZh: Record<string, string> = {
   "settings.extensions.webdav.uploadNone": "没有可上传的备份",
   "settings.extensions.webdav.uploadHint":
     "一份备份打成一个 zip，不含注册表数据；云端已有相同文件会自动跳过。",
-  "settings.extensions.webdav.browse": "云端备份",
+  "settings.extensions.webdav.browse": "云端备份列表",
   "settings.extensions.webdav.browseTitle": "云端备份",
   "settings.extensions.webdav.browseDesc": "共 {count} 份，下载后会解压到本地备份目录",
   "settings.extensions.webdav.browseEmpty": "云端还没有备份",
@@ -167,6 +168,7 @@ export const settingsEn: Record<string, string> = {
   "settings.saves.desc": "Backup location and rotation apply to all upcoming backups",
   "settings.saves.pathLabel": "Backup location",
   "settings.saves.pathHint": "Leave empty to use Backups inside the app data folder",
+  "settings.saves.placeholder": "Default location",
   "settings.saves.browse": "Browse",
   "settings.saves.maxLabel": "Backups to keep",
   "settings.saves.maxHint": "Oldest backups are removed beyond this limit; pinned ones are kept",
@@ -240,7 +242,7 @@ export const settingsEn: Record<string, string> = {
   "settings.extensions.webdav.uploadNone": "No backups to upload",
   "settings.extensions.webdav.uploadHint":
     "Each backup becomes a single zip; registry entries excluded. Files already in the cloud are skipped automatically.",
-  "settings.extensions.webdav.browse": "Cloud backups",
+  "settings.extensions.webdav.browse": "Cloud backup list",
   "settings.extensions.webdav.browseTitle": "Cloud backups",
   "settings.extensions.webdav.browseDesc": "{count} file(s); downloading extracts into your local backups folder",
   "settings.extensions.webdav.browseEmpty": "No backups in the cloud yet",

@@ -16,6 +16,8 @@ export interface GameEntry {
   gogId: string | null;
   platforms: string[];
   zhCn: string | null;
+  /** 繁体中文名（Steam 官方 l=tchinese），可能为空 */
+  zhHant: string | null;
   paths: SaveLocations;
 }
 
@@ -56,6 +58,8 @@ export interface BackupSummary {
   date: string; // YYYY-MM-DD_HH-mm
   title: string;
   zhCn: string | null;
+  /** 备份列表暂未从后端取繁体名，缺省时回退 zhCn */
+  zhHant?: string | null;
   backupSize: number | null;
   backupPaths: BackupPathEntry[];
   isPermanent: boolean;
@@ -67,6 +71,8 @@ export interface GameBackups {
   latestBackup: string;
   title: string;
   zhCn: string | null;
+  /** 繁体中文名；后端备份列表暂未返回，缺省时前端回退 zhCn */
+  zhHant?: string | null;
   backupSize: number | null;
   backups: BackupSummary[];
 }
@@ -117,6 +123,10 @@ export interface TrainerHit {
   id: string;
   gameName: string;
   zhName: string | null;
+  /** 游戏库里的官方繁体名；没有则为 null（繁体界面回退原名） */
+  zhHant: string | null;
+  /** 匹配到的游戏库官方英文名；原名不是目标语言时兜底 */
+  officialName: string | null;
   pageUrl: string;
   updatedAt: string | null;
   optionsCount: number | null;
@@ -160,6 +170,10 @@ export interface TrainerManifest {
 export interface InstalledTrainer {
   manifest: TrainerManifest;
   folder: string;
+  /** 游戏库官方简体名（list 命令按 manifest.gameName 回填；查不到为 null） */
+  zhNameResolved: string | null;
+  /** 游戏库官方繁体名 */
+  zhHantResolved: string | null;
 }
 
 export interface TrainerDownload {

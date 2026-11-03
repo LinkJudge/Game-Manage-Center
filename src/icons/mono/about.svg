@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+        
+
+        
+
+        <g>
+          <circle cx="256" cy="256" r="146" fill="currentColor" stroke="currentColor" stroke-width="2"/>
+          <circle cx="256" cy="256" r="106" fill="currentColor" opacity="0.9"/>
+
+          <!-- 默认：感叹号 (!) -->
+          <g id="about-mark-excl">
+            <rect x="238" y="176" width="36" height="96" rx="18" fill="currentColor"/>
+            <circle cx="256" cy="314" r="19" fill="currentColor"/>
+          </g>
+
+          <!-- 备选：信息符 (i) -->
+          <g id="about-mark-info" style="display:none;">
+            <circle cx="256" cy="192" r="19" fill="currentColor"/>
+            <rect x="238" y="232" width="36" height="96" rx="18" fill="currentColor"/>
+          </g>
+        </g>
+      </svg>

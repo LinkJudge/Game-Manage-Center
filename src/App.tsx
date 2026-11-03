@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { toast } from "sonner";
-import { Copy, Minus, Square, X } from "lucide-react";
+import { Copy, Minus, Settings as SettingsIcon, Square, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ActionTooltip, TooltipProvider } from "@/components/ui/tooltip";
@@ -137,22 +137,26 @@ function App() {
           <div className="flex items-center gap-2 px-4 pb-2.5" data-tauri-drag-region>
             <TabsList className="gm-main-tabs h-10 rounded-full p-1">
               <TabsTrigger value="saves" className="gm-main-tab">
-                <span className="gm-nav-icon"><img src="/icons/save.svg" alt="" /></span>
+                <span className="gm-nav-icon gm-nav-icon-bare"><img src="/icons/save.svg" alt="" /></span>
                 {t("nav.saves")}
               </TabsTrigger>
               <TabsTrigger value="trainers" className="gm-main-tab">
-                <span className="gm-nav-icon"><img src="/icons/trainer.svg" alt="" /></span>
+                <span className="gm-nav-icon gm-nav-icon-bare"><img src="/icons/trainer.svg" alt="" /></span>
                 {t("nav.trainers")}
               </TabsTrigger>
-              <ActionTooltip content={t("app.mod.planned")} disabled>
-                <TabsTrigger value="mods" disabled className="gm-main-tab">
-                  <span className="gm-nav-icon"><img src="/icons/mod.svg" alt="" /></span>
-                  MOD
-                </TabsTrigger>
-              </ActionTooltip>
+              <TabsTrigger value="mods" className="gm-main-tab">
+                <span className="gm-nav-icon gm-nav-icon-bare"><img src="/icons/mod.svg" alt="" /></span>
+                {t("nav.mods")}
+              </TabsTrigger>
             </TabsList>
             <div className="h-6 flex-1" data-tauri-drag-region />
-            <Button variant="outline" size="sm" className="gm-settings-button rounded-full" onClick={() => setSettingsOpen(true)}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gm-settings-button gap-1.5 rounded-full"
+              onClick={() => setSettingsOpen(true)}
+            >
+              <SettingsIcon className="size-[1.05rem]" />
               {t("nav.settings")}
             </Button>
           </div>
@@ -167,7 +171,7 @@ function App() {
           className="flex min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden"
         >
           <div className="gm-page-hero flex items-center gap-3 px-7 pb-2 pt-5">
-            <span className="gm-page-icon">
+            <span className="gm-page-icon gm-page-icon-bare">
               <img src="/icons/save.svg" alt="" />
             </span>
             <div>
@@ -189,7 +193,7 @@ function App() {
           className="flex min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden"
         >
           <div className="gm-page-hero flex items-center gap-3 px-7 pb-2 pt-5">
-            <span className="gm-page-icon">
+            <span className="gm-page-icon gm-page-icon-bare">
               <img src="/icons/trainer.svg" alt="" />
             </span>
             <div>
@@ -203,8 +207,32 @@ function App() {
             <TrainersTab />
           </div>
         </TabsContent>
-        {/* MOD 模块占位（规划中） */}
-        <TabsContent value="mods" className="min-h-0 flex-1" />
+        {/* MOD 模块：先开放入口，内容待实现 */}
+        <TabsContent
+          value="mods"
+          forceMount
+          className="flex min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden"
+        >
+          <div className="gm-page-hero flex items-center gap-3 px-7 pb-2 pt-5">
+            <span className="gm-page-icon gm-page-icon-bare">
+              <img src="/icons/mod.svg" alt="" />
+            </span>
+            <div>
+              <h1 className="text-[1.65rem] font-semibold tracking-[-0.03em]">{t("mods.title")}</h1>
+              <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                {t("mods.subtitle")}
+              </p>
+            </div>
+          </div>
+          <div className="gm-scroll-area min-h-0 flex-1 overflow-y-auto px-7 pb-7 pt-3">
+            <div className="rounded-2xl border border-dashed bg-card/40 px-6 py-16 text-center">
+              <h2 className="text-sm font-medium text-foreground">{t("mods.planned.title")}</h2>
+              <p className="mx-auto mt-2 max-w-md text-xs leading-relaxed text-muted-foreground">
+                {t("mods.planned.desc")}
+              </p>
+            </div>
+          </div>
+        </TabsContent>
       </Tabs>
       </main>
     </TooltipProvider>

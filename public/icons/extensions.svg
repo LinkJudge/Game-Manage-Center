@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+        <defs>
+          <filter id="drop-ext" x="-15%" y="-15%" width="130%" height="130%">
+            <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#000000" flood-opacity="0.5"/>
+          </filter>
+          <linearGradient id="bgExt" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#0B221E"/>
+            <stop offset="50%" stop-color="#11302A"/>
+            <stop offset="100%" stop-color="#061310"/>
+          </linearGradient>
+          <linearGradient id="extEmerald" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#34D399"/>
+            <stop offset="100%" stop-color="#059669"/>
+          </linearGradient>
+          <linearGradient id="extAmber" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#FF8008"/>
+            <stop offset="100%" stop-color="#FFC837"/>
+          </linearGradient>
+        </defs>
+
+        <rect x="28" y="28" width="456" height="456" rx="104" fill="url(#bgExt)" stroke="#1E564B" stroke-width="6"/>
+
+        <!-- 样式 A：经典扩展插头 -->
+        <g id="ext-style-plug" filter="url(#drop-ext)">
+          <g transform="translate(256, 256) rotate(-45) translate(-256, -256)">
+            <rect x="196" y="96" width="28" height="76" rx="14" fill="#E0F2FE" stroke="#7DD3FC" stroke-width="3"/>
+            <rect x="288" y="96" width="28" height="76" rx="14" fill="#E0F2FE" stroke="#7DD3FC" stroke-width="3"/>
+            <path d="M 152 160 H 360 C 373.25 160 384 170.75 384 184 V 260 C 384 317.44 337.44 364 280 364 H 232 C 174.56 364 128 317.44 128 260 V 184 C 128 170.75 138.75 160 152 160 Z" 
+                  fill="url(#extEmerald)" stroke="#A7F3D0" stroke-width="4" stroke-linejoin="round"/>
+            <rect x="168" y="200" width="176" height="108" rx="28" fill="#0F172A" opacity="0.88"/>
+            <path d="M 256 226 V 282 M 228 254 H 284" stroke="#34D399" stroke-width="14" stroke-linecap="round"/>
+            <path d="M 232 364 H 280 V 412 C 280 425.25 269.25 436 256 436 C 242.75 436 232 425.25 232 412 V 364 Z" fill="#0F172A" stroke="#34D399" stroke-width="4"/>
+          </g>
+          <circle cx="352" cy="352" r="66" fill="url(#extAmber)" stroke="#081A16" stroke-width="10"/>
+          <path d="M 352 322 V 382 M 322 352 H 382" stroke="#FFFFFF" stroke-width="14" stroke-linecap="round"/>
+        </g>
+
+        <!-- 样式 B：经典单体拼图块 -->
+        <g id="ext-style-puzzle" filter="url(#drop-ext)" style="display:none;">
+          <g transform="translate(256, 264) rotate(-8) translate(-256, -256)">
+            <rect x="148" y="148" width="216" height="216" rx="36" fill="url(#extEmerald)" stroke="#A7F3D0" stroke-width="5"/>
+            <circle cx="256" cy="140" r="36" fill="url(#extEmerald)" stroke="#A7F3D0" stroke-width="5"/>
+            <rect x="212" y="142" width="88" height="30" fill="url(#extEmerald)"/>
+            <circle cx="372" cy="256" r="36" fill="url(#extEmerald)" stroke="#A7F3D0" stroke-width="5"/>
+            <rect x="340" y="212" width="30" height="88" fill="url(#extEmerald)"/>
+            <rect x="192" y="192" width="128" height="128" rx="24" fill="#0F172A" opacity="0.88"/>
+            <path d="M 256 224 V 288 M 224 256 H 288" stroke="#34D399" stroke-width="16" stroke-linecap="round"/>
+          </g>
+        </g>
+      </svg>

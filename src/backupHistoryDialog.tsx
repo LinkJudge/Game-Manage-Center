@@ -1,4 +1,4 @@
-import { gameNamePair, useI18n } from "@/i18n";
+import { gameNamePair, useI18n, localeTag, errText } from "@/i18n";
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useMutation } from "@tanstack/react-query";
@@ -41,7 +41,7 @@ function formatBackupDate(date: string): string {
 
 function formatMs(ms: number | null): string {
   if (!ms) return "—";
-  return new Date(ms).toLocaleString("zh-CN", { dateStyle: "short", timeStyle: "short" });
+  return new Date(ms).toLocaleString(localeTag(), { dateStyle: "short", timeStyle: "short" });
 }
 
 export function BackupHistoryDialog({
@@ -56,7 +56,7 @@ export function BackupHistoryDialog({
   onChanged: () => void;
 }) {
   const { t, lang } = useI18n();
-  const gameName = game ? gameNamePair(game.title, game.zhCn, lang).main : "";
+  const gameName = game ? gameNamePair(game.title, game.zhCn, lang, game.zhHant ?? null).main : "";
 
   const [conflict, setConflict] = useState<{
     date: string;
@@ -83,7 +83,7 @@ export function BackupHistoryDialog({
     },
     onError: (e) => {
       if (String(e).includes("CONFLICT")) return;
-      toast.error(t("saves.toast.restoreFailed"), { description: String(e) });
+      toast.error(t("saves.toast.restoreFailed"), { description: errText(e) });
     },
   });
 
@@ -94,7 +94,7 @@ export function BackupHistoryDialog({
       toast.success(t("dialogs.history.deleted"));
       onChanged();
     },
-    onError: (e) => toast.error(t("dialogs.history.deleteFailed"), { description: String(e) }),
+    onError: (e) => toast.error(t("dialogs.history.deleteFailed"), { description: errText(e) }),
   });
 
   const doPin = useMutation({
@@ -108,7 +108,7 @@ export function BackupHistoryDialog({
       toast.success(t("dialogs.history.pinUpdated"));
       onChanged();
     },
-    onError: (e) => toast.error(t("saves.toast.opFailed"), { description: String(e) }),
+    onError: (e) => toast.error(t("saves.toast.opFailed"), { description: errText(e) }),
   });
 
   const startRestore = (date: string) => {
@@ -118,7 +118,7 @@ export function BackupHistoryDialog({
         if (info.conflict) setConflict({ date, info });
         else restore.mutate({ date, force: false });
       })
-      .catch((e) => toast.error(t("dialogs.history.checkFailed"), { description: String(e) }));
+      .catch((e) => toast.error(t("dialogs.history.checkFailed"), { description: errText(e) }));
   };
 
   return (

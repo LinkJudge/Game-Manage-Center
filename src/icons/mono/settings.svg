@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+        
+
+        <!-- 统一圆角底板 -->
+        
+
+        <g transform="translate(256, 256)">
+          <!-- 外发光描边底层 (使6个齿与轮盘外缘形成无内部接缝的统一描边) -->
+          <g fill="currentColor" stroke="currentColor" stroke-width="3" stroke-linejoin="round">
+            <rect x="-40" y="-152" width="80" height="304" rx="26"/>
+            <rect x="-40" y="-152" width="80" height="304" rx="26" transform="rotate(60)"/>
+            <rect x="-40" y="-152" width="80" height="304" rx="26" transform="rotate(120)"/>
+            <circle cx="0" cy="0" r="118"/>
+          </g>
+
+          <!-- 一体式无接缝六齿渐变主体 -->
+          <g fill="currentColor">
+            <rect x="-40" y="-152" width="80" height="304" rx="26"/>
+            <rect x="-40" y="-152" width="80" height="304" rx="26" transform="rotate(60)"/>
+            <rect x="-40" y="-152" width="80" height="304" rx="26" transform="rotate(120)"/>
+            <circle cx="0" cy="0" r="118"/>
+          </g>
+
+          <!-- 中心极简深色轴承孔 + 高亮内环 -->
+          <circle cx="0" cy="0" r="58" fill="currentColor" stroke="currentColor" stroke-width="4"/>
+        </g>
+      </svg>

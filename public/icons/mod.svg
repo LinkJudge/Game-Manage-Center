@@ -1,21 +1,28 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <defs>
-    <filter id="drop" x="-15%" y="-15%" width="130%" height="130%"><feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#000000" flood-opacity="0.5"/></filter>
-    <linearGradient id="bgMod" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#1A102E"/><stop offset="50%" stop-color="#22153B"/><stop offset="100%" stop-color="#0E081A"/></linearGradient>
-    <linearGradient id="purpleCore" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#A855F7"/><stop offset="100%" stop-color="#6366F1"/></linearGradient>
-    <linearGradient id="neonGreen" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#34D399"/><stop offset="100%" stop-color="#059669"/></linearGradient>
-  </defs>
-  <rect x="28" y="28" width="456" height="456" rx="104" fill="url(#bgMod)" stroke="#4C2882" stroke-width="6"/>
-  <g filter="url(#drop)">
-    <rect x="112" y="132" width="124" height="124" rx="26" fill="url(#purpleCore)" stroke="#C084FC" stroke-width="3"/>
-    <rect x="112" y="276" width="124" height="124" rx="26" fill="#3B2366" stroke="#7E52C4" stroke-width="3"/>
-    <rect x="256" y="276" width="124" height="124" rx="26" fill="url(#purpleCore)" stroke="#C084FC" stroke-width="3"/>
-    <circle cx="174" cy="266" r="20" fill="url(#purpleCore)"/>
-    <circle cx="246" cy="338" r="20" fill="#3B2366"/>
-    <g transform="translate(18, -18) rotate(8 320 180)">
-      <rect x="256" y="128" width="132" height="132" rx="30" fill="url(#neonGreen)" stroke="#A7F3D0" stroke-width="5"/>
-      <path d="M322 166 V222 M294 194 H350" stroke="#064E3B" stroke-width="16" stroke-linecap="round"/>
-    </g>
-  </g>
-  <rect x="28" y="28" width="456" height="456" rx="104" fill="none" stroke="#4C2882" stroke-width="6"/>
-</svg>
+        <defs>
+          <filter id="drop-mod" x="-15%" y="-15%" width="130%" height="130%">
+            <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#000000" flood-opacity="0.5"/>
+          </filter>
+          <linearGradient id="bgMod" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#1A102E"/><stop offset="50%" stop-color="#22153B"/><stop offset="100%" stop-color="#0E081A"/>
+          </linearGradient>
+          <linearGradient id="purpleCore" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#A855F7"/><stop offset="100%" stop-color="#6366F1"/>
+          </linearGradient>
+          <linearGradient id="neonGreen" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#34D399"/><stop offset="100%" stop-color="#059669"/>
+          </linearGradient>
+        </defs>
+        <rect x="28" y="28" width="456" height="456" rx="104" fill="url(#bgMod)" stroke="#4C2882" stroke-width="6"/>
+        <g filter="url(#drop-mod)">
+          <rect x="112" y="132" width="124" height="124" rx="26" fill="url(#purpleCore)" stroke="#C084FC" stroke-width="3"/>
+          <rect x="112" y="276" width="124" height="124" rx="26" fill="#3B2366" stroke="#7E52C4" stroke-width="3"/>
+          <rect x="256" y="276" width="124" height="124" rx="26" fill="url(#purpleCore)" stroke="#C084FC" stroke-width="3"/>
+          <circle cx="174" cy="266" r="20" fill="url(#purpleCore)"/>
+          <circle cx="246" cy="338" r="20" fill="#3B2366"/>
+          <g transform="translate(18, -18) rotate(8 320 180)">
+            <rect x="256" y="128" width="132" height="132" rx="30" fill="url(#neonGreen)" stroke="#A7F3D0" stroke-width="5"/>
+            <path d="M322 166 V222 M294 194 H350" stroke="#064E3B" stroke-width="16" stroke-linecap="round"/>
+          </g>
+        </g>
+      </svg>

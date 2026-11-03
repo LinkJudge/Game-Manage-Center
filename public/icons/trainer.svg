@@ -1,24 +1,34 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <defs>
-    <filter id="drop" x="-15%" y="-15%" width="130%" height="130%"><feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#000000" flood-opacity="0.5"/></filter>
-    <linearGradient id="bgTrainer" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#231217"/><stop offset="50%" stop-color="#2D1810"/><stop offset="100%" stop-color="#140B09"/></linearGradient>
-    <linearGradient id="orangeGlow" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#FF8008"/><stop offset="100%" stop-color="#FFC837"/></linearGradient>
-    <linearGradient id="dlArrow" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#FF416C"/><stop offset="100%" stop-color="#FF4B2B"/></linearGradient>
-    <linearGradient id="panelGrad" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#332228"/><stop offset="100%" stop-color="#1E1418"/></linearGradient>
-  </defs>
-  <rect x="28" y="28" width="456" height="456" rx="104" fill="url(#bgTrainer)" stroke="#5C2D1E" stroke-width="6"/>
-  <g filter="url(#drop)">
-    <rect x="104" y="108" width="272" height="276" rx="36" fill="url(#panelGrad)" stroke="#6E3B2B" stroke-width="5"/>
-    <line x1="144" y1="168" x2="336" y2="168" stroke="#120B0D" stroke-width="16" stroke-linecap="round"/>
-    <line x1="144" y1="168" x2="288" y2="168" stroke="url(#orangeGlow)" stroke-width="16" stroke-linecap="round"/>
-    <circle cx="288" cy="168" r="20" fill="#FFFFFF" stroke="#FF8008" stroke-width="6"/>
-    <line x1="144" y1="246" x2="336" y2="246" stroke="#120B0D" stroke-width="16" stroke-linecap="round"/>
-    <line x1="144" y1="246" x2="204" y2="246" stroke="url(#orangeGlow)" stroke-width="16" stroke-linecap="round"/>
-    <circle cx="204" cy="246" r="20" fill="#FFFFFF" stroke="#FF8008" stroke-width="6"/>
-    <line x1="144" y1="324" x2="336" y2="324" stroke="#120B0D" stroke-width="16" stroke-linecap="round"/>
-    <line x1="144" y1="324" x2="256" y2="324" stroke="url(#orangeGlow)" stroke-width="16" stroke-linecap="round"/>
-    <circle cx="256" cy="324" r="20" fill="#FFFFFF" stroke="#FF8008" stroke-width="6"/>
-    <circle cx="352" cy="344" r="70" fill="url(#dlArrow)" stroke="#170C0A" stroke-width="10"/>
-    <path d="M352 308 V372 M324 348 L352 376 L380 348" fill="none" stroke="#FFFFFF" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
-  </g>
-</svg>
+        <defs>
+          <filter id="drop-trn" x="-15%" y="-15%" width="130%" height="130%">
+            <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#000000" flood-opacity="0.5"/>
+          </filter>
+          <linearGradient id="bgTrainer" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#231217"/><stop offset="50%" stop-color="#2D1810"/><stop offset="100%" stop-color="#140B09"/>
+          </linearGradient>
+          <linearGradient id="orangeGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#FF8008"/><stop offset="100%" stop-color="#FFC837"/>
+          </linearGradient>
+          <linearGradient id="dlArrow" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#FF416C"/><stop offset="100%" stop-color="#FF4B2B"/>
+          </linearGradient>
+          <linearGradient id="panelGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#332228"/><stop offset="100%" stop-color="#1E1418"/>
+          </linearGradient>
+        </defs>
+        <rect x="28" y="28" width="456" height="456" rx="104" fill="url(#bgTrainer)" stroke="#5C2D1E" stroke-width="6"/>
+        <g filter="url(#drop-trn)">
+          <rect x="104" y="108" width="272" height="276" rx="36" fill="url(#panelGrad)" stroke="#6E3B2B" stroke-width="5"/>
+          <line x1="144" y1="168" x2="336" y2="168" stroke="#120B0D" stroke-width="16" stroke-linecap="round"/>
+          <line x1="144" y1="168" x2="288" y2="168" stroke="url(#orangeGlow)" stroke-width="16" stroke-linecap="round"/>
+          <circle cx="288" cy="168" r="20" fill="#FFFFFF" stroke="#FF8008" stroke-width="6"/>
+          <line x1="144" y1="246" x2="336" y2="246" stroke="#120B0D" stroke-width="16" stroke-linecap="round"/>
+          <line x1="144" y1="246" x2="204" y2="246" stroke="url(#orangeGlow)" stroke-width="16" stroke-linecap="round"/>
+          <circle cx="204" cy="246" r="20" fill="#FFFFFF" stroke="#FF8008" stroke-width="6"/>
+          <line x1="144" y1="324" x2="336" y2="324" stroke="#120B0D" stroke-width="16" stroke-linecap="round"/>
+          <line x1="144" y1="324" x2="256" y2="324" stroke="url(#orangeGlow)" stroke-width="16" stroke-linecap="round"/>
+          <circle cx="256" cy="324" r="20" fill="#FFFFFF" stroke="#FF8008" stroke-width="6"/>
+          <circle cx="352" cy="344" r="70" fill="url(#dlArrow)" stroke="#170C0A" stroke-width="10"/>
+          <path d="M352 308 V372 M324 348 L352 376 L380 348" fill="none" stroke="#FFFFFF" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
+      </svg>
