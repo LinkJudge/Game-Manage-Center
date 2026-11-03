@@ -64,3 +64,42 @@ docs/项目演进-0.1到0.5.html
 
 # Release 模板（内部备忘，不入公开仓库）
 docs/release-template.md
+
+# 本机维护与内部审查资料（保留本地，不进公开仓库）
+/scripts/zh-names/clash_ctl.py
+/scripts/zh-names/steam_watchdog.py
+/scripts/zh-names/hant_rotate_run.py
+/scripts/zh-names/run_hant_job.py
+/scripts/zh-names/run_ja_job.py
+/scripts/zh-names/test_mutex.py
+/scripts/zh-names/hant_progress.py
+/scripts/zh-names/status.py
+/scripts/pcgw/diagnose.cjs
+/scripts/pcgw/diagnose2.cjs
+/scripts/compare_refs.py
+/scripts/scan_sources.py
+/scripts/export_review_lists.py
+/scripts/zh-names/audit_fields.py
+/scripts/zh-names/compare_en.py
+/scripts/zh-names/export_nonstandard.py
+/scripts/zh-names/fix_official_en_pollution.py
+/scripts/zh-names/merge_name_sources.py
+/scripts/zh-names/report_crosscheck.py
+/scripts/zh-names/survey_titles.py
+/scripts/zh-names/snapshot.py
+/scripts/compare_icons.py
+/scripts/preview_line_icons.py
+/scripts/preview_mono_icons.py
+/scripts/i18n/icon_map.py
+/docs/review/conflicts.csv
+/docs/review/duplicate_appids.csv
+/docs/review/hant_missing.csv
+/docs/review/name_problems.csv
+/docs/review/zh_eq_en.csv
+/docs/zh-name-quality.md
+/scripts/zh-names/xiaoheihe_zh.py
+/scripts/zh-names/fetch_extra_names.py
+/scripts/zh-names/run_batches.py
+/scripts/zh-names/fetch_missing_names.py
+/scripts/extract_icons.py
+/scripts/zh-names/collection_state.py
