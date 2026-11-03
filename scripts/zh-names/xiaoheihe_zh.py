@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import gzip
+import gzip
 import json
 import random
 import re
@@ -49,6 +50,14 @@ import zlib
 from datetime import datetime, timedelta
 from http.cookiejar import CookieJar
 from pathlib import Path
+
+# 控制台编码兜底：计划任务/无 PYTHONUTF8 环境下 stdout 默认是 GBK，
+# 碰到游戏名里的 ™ ® 会直接 UnicodeEncodeError 崩掉（2026-11-02 实测）。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:  # noqa: BLE001
+        pass
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DB = ROOT / "src-tauri" / "resources" / "database.db"
@@ -172,7 +181,8 @@ class Session:
                 pass
             time.sleep(random.uniform(1.5, 3.5))
 
-    def fetch_name(self, appid: str, timeout: int = 20) -> str | None:
+    def fetch_name(self, appid: str, timeout: int = 20) -> tuple[str | None, str | None, dict | None]:
+        """返回 (主标题, 原英文标题)。小黑盒主标题不一定是中文，英文标题单独在 name_en 字段。"""
         query = urllib.parse.urlencode(
             {"appid": appid, "_time": int(time.time()), "heybox_id": ""}
         )
@@ -188,9 +198,11 @@ class Session:
         if status != "ok":
             if any(hint in message.lower() or hint in message for hint in BLOCK_HINTS):
                 raise Blocked(f"status={status} msg={message}")
-            return None
+            return None, None, None
         result = payload.get("result") or {}
-        return str(result.get("name") or "").strip() or None
+        name = str(result.get("name") or "").strip() or None
+        name_en = str(result.get("name_en") or "").strip() or None
+        return name, name_en, result
 
 
 def installed_steam_appids() -> set[str]:
@@ -275,11 +287,11 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=200, help="最多处理多少条记录；0 = 全部")
     parser.add_argument("--budget", type=int, default=60, help="本轮最多发多少个请求；0 = 不限")
     parser.add_argument("--delay", type=float, default=None, help="固定间隔秒数（默认随机 3.5~8.5）")
-    parser.add_argument("--min-delay", type=float, default=3.5)
-    parser.add_argument("--max-delay", type=float, default=8.5)
-    parser.add_argument("--pause-every", type=int, nargs=2, default=[20, 38],
+    parser.add_argument("--min-delay", type=float, default=2.2)
+    parser.add_argument("--max-delay", type=float, default=5.5)
+    parser.add_argument("--pause-every", type=int, nargs=2, default=[26, 48],
                         metavar=("MIN", "MAX"), help="每多少个请求插一次长停顿（随机区间）")
-    parser.add_argument("--pause-range", type=float, nargs=2, default=[45, 150],
+    parser.add_argument("--pause-range", type=float, nargs=2, default=[40, 110],
                         metavar=("MIN", "MAX"), help="长停顿秒数区间")
     parser.add_argument("--cooldown-hours", type=float, default=6.0,
                         help="触发封禁后多少小时内拒绝重跑")
@@ -312,7 +324,10 @@ def main() -> int:
             )
             return 3
 
-    conn = sqlite3.connect(args.db)
+    # 允许和别的采集器并行：写锁冲突时排队等待，而不是立刻抛 database is locked
+    # （2026-11-01：因为没有这个设置，Steam 采集一开就把本脚本打断过）
+    conn = sqlite3.connect(args.db, timeout=30)
+    conn.execute("PRAGMA busy_timeout = 30000")
     conn.row_factory = sqlite3.Row
     conn.execute(
         """
@@ -322,10 +337,22 @@ def main() -> int:
             name TEXT,
             status TEXT NOT NULL,
             checked_at TEXT NOT NULL,
+            name_en TEXT,
             PRIMARY KEY (pcgw_id, source)
         )
         """
     )
+    # 老库补列：name_en 存小黑盒的「原英文标题」，主标题可能不是中文时用它当英文名
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(name_sources)")}
+    has_name_en = "name_en" in cols
+    if not has_name_en:
+        try:
+            conn.execute("ALTER TABLE name_sources ADD COLUMN name_en TEXT")
+            conn.commit()
+            has_name_en = True
+            print("已为 name_sources 补上 name_en 列")
+        except sqlite3.OperationalError as error:
+            print(f"[警告] 补列失败（{error}），本次只写主标题")
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_name_sources_name ON name_sources(name)"
     )
@@ -408,9 +435,10 @@ def main() -> int:
     skipped = 0
     failed = 0
     requests_made = 0
-    cache: dict[str, str | None] = {}
+    cache: dict[str, tuple[str | None, str | None, dict | None]] = {}
     pending: list[tuple[str, int]] = []
-    source_pending: list[tuple[int, str, str | None, str, str]] = []
+    source_pending: list[tuple[int, str, str | None, str, str, str | None]] = []
+    raw_pending: list[tuple[int, bytes, str]] = []
 
     def flush() -> None:
         if not pending and not source_pending:
@@ -422,20 +450,42 @@ def main() -> int:
                 pending,
             )
         if source_pending:
+            if has_name_en:
+                conn.executemany(
+                    """
+                    INSERT INTO name_sources(pcgw_id, source, name, status, checked_at, name_en)
+                    VALUES(?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(pcgw_id, source) DO UPDATE SET
+                        name = excluded.name,
+                        status = excluded.status,
+                        checked_at = excluded.checked_at,
+                        name_en = excluded.name_en
+                    """,
+                    source_pending,
+                )
+            else:
+                conn.executemany(
+                    """
+                    INSERT INTO name_sources(pcgw_id, source, name, status, checked_at)
+                    VALUES(?, ?, ?, ?, ?)
+                    ON CONFLICT(pcgw_id, source) DO UPDATE SET
+                        name = excluded.name,
+                        status = excluded.status,
+                        checked_at = excluded.checked_at
+                    """,
+                    [row[:5] for row in source_pending],
+                )
+        if raw_pending:
             conn.executemany(
-                """
-                INSERT INTO name_sources(pcgw_id, source, name, status, checked_at)
-                VALUES(?, ?, ?, ?, ?)
-                ON CONFLICT(pcgw_id, source) DO UPDATE SET
-                    name = excluded.name,
-                    status = excluded.status,
-                    checked_at = excluded.checked_at
-                """,
-                source_pending,
+                "INSERT INTO xhh_raw(pcgw_id, payload, fetched_at) VALUES(?, ?, ?) "
+                "ON CONFLICT(pcgw_id) DO UPDATE SET "
+                "payload = excluded.payload, fetched_at = excluded.fetched_at",
+                raw_pending,
             )
         conn.commit()
         pending.clear()
         source_pending.clear()
+        raw_pending.clear()
 
     exit_code = 0
     for index, row in enumerate(rows, 1):
@@ -449,12 +499,12 @@ def main() -> int:
             continue
 
         if appid in cache:
-            name = cache[appid]
+            name, name_en, payload = cache[appid]
         else:
             session.breathe()
             requests_made += 1
             try:
-                name = session.fetch_name(appid)
+                name, name_en, payload = session.fetch_name(appid)
             except Blocked as blocked:
                 write_block_marker(str(blocked))
                 print(f"[{index}/{len(rows)}] {row['title']} ({appid}) -> 触发风控：{blocked}")
@@ -475,15 +525,23 @@ def main() -> int:
                 print(f"[{index}/{len(rows)}] {row['title']} ({appid}) -> 失败：{error}")
                 time.sleep(random.uniform(5, 12))
                 continue
-            cache[appid] = name
+            cache[appid] = (name, name_en, payload)
 
         checked_at = datetime.now().isoformat(timespec="seconds")
+        if payload:
+            raw_pending.append(
+                (
+                    row["wiki_page_id"],
+                    gzip.compress(json.dumps(payload, ensure_ascii=False).encode("utf-8"), 6),
+                    checked_at,
+                )
+            )
 
         if not name:
             skipped += 1
             if not args.dry_run:
                 source_pending.append(
-                    (row["wiki_page_id"], "xiaoheihe", None, "no_name", checked_at)
+                    (row["wiki_page_id"], "xiaoheihe", None, "no_name", checked_at, name_en)
                 )
             print(f"[{index}/{len(rows)}] {row['title']} ({appid}) -> 无中文名，已记录")
         elif not has_chinese(name):
@@ -492,7 +550,7 @@ def main() -> int:
             latin += 1
             if not args.dry_run:
                 source_pending.append(
-                    (row["wiki_page_id"], "xiaoheihe", name, "latin", checked_at)
+                    (row["wiki_page_id"], "xiaoheihe", name, "latin", checked_at, name_en)
                 )
             print(f"[{index}/{len(rows)}] {row['title']} ({appid}) -> 非中文名「{name}」，仅记录")
         else:
@@ -511,12 +569,12 @@ def main() -> int:
                 print(f"[{index}/{len(rows)}] {row['title']} -> 补入主名：{name}")
             if not args.dry_run:
                 source_pending.append(
-                    (row["wiki_page_id"], "xiaoheihe", name, "named", checked_at)
+                    (row["wiki_page_id"], "xiaoheihe", name, "named", checked_at, name_en)
                 )
                 if not existing:
                     pending.append((name, row["wiki_page_id"]))
 
-        if not args.dry_run and len(source_pending) >= 10:
+        if not args.dry_run and (len(source_pending) >= 10 or len(raw_pending) >= 10):
             flush()
 
     if not args.dry_run:

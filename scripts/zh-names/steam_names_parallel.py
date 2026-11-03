@@ -35,6 +35,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
+import requests
+
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DB = ROOT / "src-tauri" / "resources" / "database.db"
 API = "https://store.steampowered.com/api/appdetails?appids={appid}&l=schinese&cc=cn&filters=basic"
@@ -58,25 +60,46 @@ CREATE TABLE IF NOT EXISTS steam_names (
 _gate = threading.Lock()
 _next_slot = 0.0
 GAP = 0.22
+_MIN_GAP = 0.22
+_ok_streak = 0
 _stop = threading.Event()
 _stats = {"ok": 0, "en_only": 0, "missing": 0, "error": 0}
 _stats_lock = threading.Lock()
 
 # 通道：环境里的 HTTPS_PROXY=127.0.0.1:51731 对 store.steampowered.com 不通，
 # 会让每条请求挂满超时。默认直连，本机要代理必须显式 --proxy http://127.0.0.1:7897。
-_OPENER: urllib.request.OpenerDirector = urllib.request.build_opener(
-    urllib.request.ProxyHandler({})
-)
+#
+# ⚠️ 必须用 requests 而不是 urllib（2026-10-31 踩坑）：跑了几百条后 Steam 开始返回
+# `SSL: UNEXPECTED_EOF_WHILE_READING`，直连/代理/换 cc 都一样，而同一台机器上
+# Chrome 和 requests 都能正常拿到数据。说明被拒的是 urllib 的 TLS 握手特征，
+# 不是 IP。requests 的 Session 还带 keep-alive，握手次数大幅减少，更不容易被盯上。
+_PROXIES: dict[str, str] | None = None
+_local = threading.local()
 
 
 def set_proxy(url: str) -> None:
-    global _OPENER
-    if url:
-        _OPENER = urllib.request.build_opener(
-            urllib.request.ProxyHandler({"http": url, "https": url})
+    global _PROXIES
+    _PROXIES = {"http": url, "https": url} if url else None
+
+
+def _session() -> requests.Session:
+    session = getattr(_local, "session", None)
+    if session is None:
+        session = requests.Session()
+        session.headers.update(
+            {
+                "User-Agent": UA,
+                "Accept": "*/*",
+                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                "Connection": "keep-alive",
+            }
         )
-    else:
-        _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        if _PROXIES:
+            session.proxies.update(_PROXIES)
+        session.trust_env = False  # 不读环境变量里的代理，通道只由 --proxy 决定
+        _local.session = session
+    return session
+
 
 
 def _throttle() -> None:
@@ -90,6 +113,20 @@ def _throttle() -> None:
         time.sleep(delay)
 
 
+def _speed_up() -> None:
+    """连续成功 60 次就把全局间隔收 15%，最低回到启动时的值。
+
+    为什么需要：429 会把 GAP 一路抬到 2.0 且再也不降，节点已经换好了也还是龟速。
+    有了这个，看门狗换完节点后不用重启进程，速度会自己爬回来。
+    """
+    global GAP, _ok_streak
+    with _gate:
+        _ok_streak += 1
+        if _ok_streak >= 60 and GAP > _MIN_GAP:
+            GAP = max(_MIN_GAP, GAP * 0.85)
+            _ok_streak = 0
+
+
 def fetch(appid: str, retries: int = 2, timeout: int = 12):
     """返回 (status, name_zh, name_en)。status ∈ ok/en_only/missing/error。"""
     last_error = None
@@ -97,30 +134,33 @@ def fetch(appid: str, retries: int = 2, timeout: int = 12):
         if _stop.is_set():
             return "error", None, None
         _throttle()
-        request = urllib.request.Request(API.format(appid=appid), headers={"User-Agent": UA})
         try:
-            with _OPENER.open(request, timeout=timeout) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as error:
-            if error.code == 429:
+            response = _session().get(API.format(appid=appid), timeout=timeout)
+            if response.status_code == 429:
                 # 全局限速翻倍，休息一会儿再继续（不是单条重试）
-                global GAP
-                GAP = min(1.2, GAP * 2)
-                print(f"      ! 429 限流，全局间隔调到 {GAP:.2f}s，暂停 45s", flush=True)
+                global GAP, _ok_streak
+                with _gate:
+                    GAP = min(2.0, GAP * 2)
+                    _ok_streak = 0
+                    current = GAP
+                print(f"      ! 429 限流，全局间隔调到 {current:.2f}s，暂停 45s", flush=True)
                 time.sleep(45)
-                last_error = error
+                last_error = response
                 continue
-            if error.code >= 500:
+            if response.status_code >= 500:
                 time.sleep(2 * (attempt + 1))
-                last_error = error
+                last_error = response
                 continue
-            return "error", None, None
+            if response.status_code != 200:
+                return "error", None, None
+            payload = json.loads(response.text)
         except Exception as error:  # noqa: BLE001 - 网络抖动一律按可重试处理
             time.sleep(1.5 * (attempt + 1))
             last_error = error
             continue
 
         entry = payload.get(appid) or {}
+        _speed_up()  # 连续成功就把间隔往回收，节点换好后不用重启也能恢复速度
         if not entry.get("success"):
             return "missing", None, None
         name = str((entry.get("data") or {}).get("name") or "").strip()
@@ -160,6 +200,7 @@ def main() -> int:
         args.workers, args.limit = 2, 20
     set_proxy(args.proxy)
     GAP = max(0.05, args.gap)
+    globals()["_MIN_GAP"] = GAP
     print(f"[通道] {'代理 ' + args.proxy if args.proxy else '直连'}", flush=True)
 
     conn = sqlite3.connect(args.db, timeout=15)

@@ -22,6 +22,14 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+# 控制台编码兜底：计划任务/无 PYTHONUTF8 环境下 stdout 默认是 GBK，
+# 碰到游戏名里的 ™ ® 会直接 UnicodeEncodeError 崩掉（2026-11-02 实测）。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:  # noqa: BLE001
+        pass
+
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = Path(__file__).resolve().parent / "xiaoheihe_zh.py"
 DB = ROOT / "src-tauri" / "resources" / "database.db"
@@ -57,8 +65,8 @@ def stats() -> tuple[int, int, int]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="小黑盒中文名采集 · 分批调度")
     parser.add_argument("--batches", type=int, default=4, help="跑几批（默认 4）")
-    parser.add_argument("--budget", type=int, default=300, help="每批请求数（默认 300）")
-    parser.add_argument("--gap", type=int, default=600, help="批间冷却秒数（默认 600）")
+    parser.add_argument("--budget", type=int, default=400, help="每批请求数（默认 400；2026-11-03 提速）")
+    parser.add_argument("--gap", type=int, default=300, help="批间冷却秒数（默认 300；2026-11-03 提速）")
     parser.add_argument("--hot", default="", help="优先榜单文件（steam-priority.json），按榜上名次优先采")
     parser.add_argument("--hot-top", type=int, default=0, help="只采榜单前 N 名（0=榜单内全部待采）")
     parser.add_argument("--probe", action="store_true", help="探活模式：1 批 × 20 请求")
@@ -95,6 +103,10 @@ def main() -> int:
             sys.executable, "-u", str(SCRIPT),
             "--budget", str(budget),
             "--limit", str(budget),
+            # 2026-11-03 二次小幅提速（戢翎拍板「再快一点点试试」）：
+            # 间隔 2.2~5.5 → 1.8~4.2，长停 40~110 → 35~90；出现 403/429 立即回退旧参数
+            "--min-delay", "1.8", "--max-delay", "4.2",
+            "--pause-every", "30", "55", "--pause-range", "35", "90",
         ]
         if args.hot:
             cmd += ["--hot", str((ROOT / args.hot).resolve() if not Path(args.hot).is_absolute() else args.hot)]
