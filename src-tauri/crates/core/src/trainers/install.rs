@@ -65,6 +65,12 @@ pub struct InstalledTrainer {
     pub manifest: TrainerManifest,
     /// 包目录绝对路径
     pub folder: String,
+    /// 游戏库官方简体名（按 manifest 的 game_name 归一化匹配；查不到为 None）
+    #[serde(default)]
+    pub zh_name_resolved: Option<String>,
+    /// 游戏库官方繁体名
+    #[serde(default)]
+    pub zh_hant_resolved: Option<String>,
 }
 
 /// 安装结果
@@ -321,6 +327,9 @@ pub fn scan_installed(root: &Path) -> Vec<InstalledTrainer> {
             out.push(InstalledTrainer {
                 manifest,
                 folder: dir.to_string_lossy().to_string(),
+                // 两语言名字由 list 命令按游戏库回填，扫描阶段先置空
+                zh_name_resolved: None,
+                zh_hant_resolved: None,
             });
         }
     }

@@ -48,6 +48,8 @@ pub struct GameEntry {
     pub gog_id: Option<String>,
     pub platforms: Vec<String>,
     pub zh_cn: Option<String>,
+    /// 繁体中文名（Steam 官方 l=tchinese）；缺省时前端回退到 zh_cn
+    pub zh_hant: Option<String>,
     pub paths: SaveLocations,
 }
 
@@ -62,7 +64,7 @@ fn value_to_text(value: Option<rusqlite::types::Value>) -> Option<String> {
 
 /// 一行 SQL → 条目（列表查询与目录名查询共用，行元组见 GameRow）
 fn game_entry_from_row(row: GameRow) -> GameEntry {
-    let (title, pcgw_id, install_folder, steam_id, gog_id, platform, zh_cn, save_location) = row;
+    let (title, pcgw_id, install_folder, steam_id, gog_id, platform, zh_cn, save_location, zh_hant) = row;
     let paths: SaveLocations = save_location
         .as_deref()
         .and_then(|json| serde_json::from_str(json).ok())
@@ -79,13 +81,14 @@ fn game_entry_from_row(row: GameRow) -> GameEntry {
         gog_id,
         platforms,
         zh_cn,
+        zh_hant,
         paths,
     }
 }
 
 const SELECT_COLUMNS: &str = "SELECT name_en AS title, pcgw_id, install_dir AS install_folder, \
      steam_appid AS steam_id, gog_appid AS gog_id, stores AS platform, name_zh AS zh_CN, \
-     save_paths AS save_location FROM games";
+     save_paths AS save_location, name_zh_hant AS zh_hant FROM games";
 
 type GameRow = (
     String,
@@ -96,7 +99,11 @@ type GameRow = (
     Option<String>,
     Option<String>,
     Option<String>,
+    Option<String>,
 );
+
+/// (name_en, name_zh, name_zh_hant)：修改器索引同时建简繁两套用的行类型
+pub type TitleNameRow = (String, Option<String>, Option<String>);
 
 fn map_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<GameRow> {
     Ok((
@@ -108,6 +115,7 @@ fn map_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<GameRow> {
         row.get(5)?,
         row.get(6)?,
         row.get(7)?,
+        row.get(8)?,
     ))
 }
 
@@ -214,6 +222,18 @@ impl Database {
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    }
+
+    /// 全库 (title, zh_CN, zh_Hant)，供修改器索引同时建简繁两套
+    pub fn title_names(&self) -> Result<Vec<TitleNameRow>, String> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT name_en, name_zh, name_zh_hant FROM games")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
             .map_err(|e| e.to_string())?;
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
     }

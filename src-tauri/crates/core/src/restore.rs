@@ -399,6 +399,7 @@ mod tests {
             gog_id: None,
             platforms: vec![],
             zh_cn: None,
+            zh_hant: None,
             paths: SaveLocations::default(),
         }
     }

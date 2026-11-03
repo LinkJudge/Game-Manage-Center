@@ -187,6 +187,9 @@ pub struct BackupManifest {
     pub title: String,
     /// 中文标题（展示用，可空）
     pub title_zh: Option<String>,
+    /// 繁体中文标题（展示用，可空；老清单没有这个字段）
+    #[serde(default)]
+    pub title_zh_hant: Option<String>,
     /// 创建时间戳，与实例目录名一致
     #[serde(default)]
     pub created_at: String,
@@ -243,6 +246,7 @@ impl From<LegacyManifest> for BackupManifest {
             schema: 0,
             title: l.title,
             title_zh: l.zh_cn,
+            title_zh_hant: None,
             created_at: String::new(),
             size: l.backup_size,
             pinned: l.is_permanent,
@@ -324,6 +328,8 @@ pub struct BackupSummary {
     pub title: String,
     #[serde(rename = "zhCn")]
     pub zh_cn: Option<String>,
+    #[serde(rename = "zhHant", default)]
+    pub zh_hant: Option<String>,
     pub backup_size: Option<u64>,
     pub backup_paths: Vec<BackupPathEntry>,
     pub is_permanent: bool,
@@ -352,6 +358,8 @@ pub struct GameBackups {
     pub title: String,
     #[serde(rename = "zhCn")]
     pub zh_cn: Option<String>,
+    #[serde(rename = "zhHant")]
+    pub zh_hant: Option<String>,
     pub backup_size: Option<u64>,
     pub backups: Vec<BackupSummary>,
 }
@@ -362,6 +370,7 @@ impl From<(String, BackupManifest)> for BackupSummary {
             date,
             title: m.title,
             zh_cn: m.title_zh,
+            zh_hant: m.title_zh_hant,
             backup_size: m.size,
             backup_paths: m
                 .entries
@@ -449,6 +458,7 @@ pub fn backup_game(
         schema: 1,
         title: entry.title.clone(),
         title_zh: entry.zh_cn.clone(),
+        title_zh_hant: entry.zh_hant.clone(),
         created_at: instance_folder.clone(),
         size: None,
         pinned: None,
@@ -548,7 +558,9 @@ pub fn backup_game(
         dest
     };
 
-    apply_rotation(&game_dir, max_backups)?;
+    // 跨目录轮换：游戏改过名时可能有多个目录，必须合起来算保留数
+    let dirs = game_dirs_for(backups_root, entry.pcgw_id);
+    apply_rotation_multi(&dirs, max_backups)?;
     Ok(final_path.to_string_lossy().to_string())
 }
 
@@ -674,6 +686,50 @@ fn set_zip_pinned(zip_path: &Path, pinned: bool) -> Result<(), String> {
 }
 
 /// 轮换清理：非固定实例（目录或 zip）超出上限时删除最旧的
+/// 跨目录轮换：把**同一个游戏所有备份目录**里的实例合起来算保留数。
+///
+/// 为什么需要：备份目录名来自游戏标题（`game_dir_name`），标题改过之后新备份
+/// 会进新目录、旧目录仍留在磁盘上。只对当前目录做轮换的话，旧目录里的备份
+/// 永远不会被清理，实际保留数 = 目录数 × max_backups，磁盘只增不减。
+///
+/// 实例名是 `2026-11-01_22-16-30` 这种时间戳，按名字排序即按时间排序；
+/// 目录实例和 zip 实例都要能删（老实现只 `remove_dir_all`，遇到 zip 会失败）。
+pub fn apply_rotation_multi(dirs: &[PathBuf], max_backups: u32) -> Result<(), String> {
+    let mut all: Vec<(String, PathBuf)> = Vec::new();
+    for dir in dirs {
+        let Ok(entries) = fs::read_dir(dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            let path = dir.join(&name);
+            let is_instance_dir = path.is_dir();
+            let is_zip = name.to_lowercase().ends_with(".zip");
+            if !is_instance_dir && !is_zip {
+                continue;
+            }
+            // 无清单或清单缺失 pinned 的实例视为可清理
+            if !instance_pinned(&path, &name) {
+                all.push((name, dir.clone()));
+            }
+        }
+    }
+    all.sort_by(|a, b| a.0.cmp(&b.0));
+    if all.len() <= max_backups as usize {
+        return Ok(());
+    }
+    for (name, dir) in &all[..all.len() - max_backups as usize] {
+        let path = dir.join(name);
+        let result = if path.is_dir() {
+            fs::remove_dir_all(&path)
+        } else {
+            fs::remove_file(&path)
+        };
+        result.map_err(|e| format!("清理旧备份失败: {e}"))?;
+    }
+    Ok(())
+}
+
 pub fn apply_rotation(game_backup_path: &Path, max_backups: u32) -> Result<(), String> {
     let Ok(entries) = fs::read_dir(game_backup_path) else {
         return Ok(());
@@ -756,18 +812,16 @@ pub fn list_backups(backups_root: &Path, pcgw_id: i64) -> Result<Option<GameBack
     let mut backups: Vec<BackupSummary> = found.into_iter().map(|(s, _)| s).collect();
 
     // 列表只展示最新实例的实测大小；缺失时补量一次并回写清单（仅目录式实例）
-    if backups[0].backup_size.is_none() {
-        if latest_path.is_dir() {
-            let (size, _) = crate::scanner::walk_size(&latest_path);
-            if let Some(summary) = backups.first_mut() {
-                summary.backup_size = Some(size);
-            }
-            let mut manifest = read_manifest_in(&latest_path)?;
-            manifest.size = Some(size);
-            write_json_atomic(&latest_path.join(MANIFEST_FILE), &manifest)?;
-            // 遗留清单升级：manifest.json 已就位，旧文件移除
-            let _ = fs::remove_file(latest_path.join(LEGACY_MANIFEST_FILE));
+    if backups[0].backup_size.is_none() && latest_path.is_dir() {
+        let (size, _) = crate::scanner::walk_size(&latest_path);
+        if let Some(summary) = backups.first_mut() {
+            summary.backup_size = Some(size);
         }
+        let mut manifest = read_manifest_in(&latest_path)?;
+        manifest.size = Some(size);
+        write_json_atomic(&latest_path.join(MANIFEST_FILE), &manifest)?;
+        // 遗留清单升级：manifest.json 已就位，旧文件移除
+        let _ = fs::remove_file(latest_path.join(LEGACY_MANIFEST_FILE));
     }
 
     Ok(Some(GameBackups {
@@ -775,6 +829,7 @@ pub fn list_backups(backups_root: &Path, pcgw_id: i64) -> Result<Option<GameBack
         latest_backup: format_backup_date(&backups[0].date),
         title: backups[0].title.clone(),
         zh_cn: backups[0].zh_cn.clone(),
+        zh_hant: backups[0].zh_hant.clone(),
         backup_size: backups[0].backup_size,
         backups,
     }))
@@ -938,6 +993,7 @@ mod tests {
             gog_id: None,
             platforms: vec![],
             zh_cn: Some("酷游戏".into()),
+            zh_hant: None,
             paths: SaveLocations::default(),
         }
     }
@@ -1048,6 +1104,65 @@ mod tests {
     }
 
     #[test]
+    fn rotation_spans_all_dirs_of_same_game() {
+        // 场景：游戏改过名 → 备份分在两个目录（Old Name / New Name），都属于 pcgw_id 42。
+        // 轮换必须把两个目录的实例合起来算，否则旧目录里的备份永远不清理。
+        let root = std::env::temp_dir().join(format!("gm-rotation-multi-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let old_dir = root.join("Old Name");
+        let new_dir = root.join("New Name");
+        let cases: [(&std::path::PathBuf, &[&str]); 2] = [
+            (&old_dir, &["2024-01-01_10-00", "2024-01-02_10-00", "2024-01-03_10-00"]),
+            (&new_dir, &["2024-01-04_10-00", "2024-01-05_10-00"]),
+        ];
+        for (dir, dates) in cases {
+            fs::create_dir_all(dir).unwrap();
+            write_game_index(
+                dir,
+                &GameIndex { schema: "gm.game-index/1".into(), pcgw_id: 42, title: "CoolGame".into() },
+            )
+            .unwrap();
+            for date in dates {
+                let inst = dir.join(date);
+                fs::create_dir_all(&inst).unwrap();
+                write_json_atomic(&inst.join(MANIFEST_FILE), &BackupManifest {
+                    schema: 1,
+                    title: "CoolGame".into(),
+                    title_zh: None,
+                    title_zh_hant: None,
+                    created_at: (*date).to_string(),
+                    size: Some(1),
+                    pinned: None,
+                    label: None,
+                    entries: vec![],
+                })
+                .unwrap();
+            }
+        }
+
+        let dirs = game_dirs_for(&root, 42);
+        assert_eq!(dirs.len(), 2, "两个目录都应归属同一个游戏");
+        apply_rotation_multi(&dirs, 3).unwrap();
+
+        let total: usize = [&old_dir, &new_dir]
+            .iter()
+            .map(|d| {
+                fs::read_dir(d)
+                    .unwrap()
+                    .flatten()
+                    .filter(|e| e.path().is_dir())
+                    .count()
+            })
+            .sum();
+        assert_eq!(total, 3, "两个目录合计只应保留 3 份");
+        // 保留的是最新三份，旧目录里最老的两份被清掉
+        assert!(new_dir.join("2024-01-05_10-00").is_dir());
+        assert!(!old_dir.join("2024-01-01_10-00").is_dir());
+        assert!(!old_dir.join("2024-01-02_10-00").is_dir());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn rotation_removes_oldest_non_permanent() {
         // 直接手工构造备份目录来测轮换，不依赖时间戳推进
         let root = std::env::temp_dir().join(format!("gm-rotation-{}", std::process::id()));
@@ -1060,6 +1175,7 @@ mod tests {
                 schema: 1,
                 title: "CoolGame".into(),
                 title_zh: None,
+                title_zh_hant: None,
                 created_at: date.into(),
                 size: Some(1),
                 pinned: None,

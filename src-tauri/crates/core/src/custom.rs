@@ -70,6 +70,7 @@ pub fn to_game_entry(custom: &CustomGame) -> crate::database::GameEntry {
         gog_id: None,
         platforms: vec!["自定义".into()],
         zh_cn: None,
+        zh_hant: None,
         paths: crate::database::SaveLocations {
             win,
             reg,

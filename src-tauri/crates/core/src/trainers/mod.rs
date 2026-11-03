@@ -104,6 +104,10 @@ pub struct TrainerHit {
     pub id: String,
     pub game_name: String,
     pub zh_name: Option<String>,
+    /// 游戏库里的官方繁体名（繁体界面用；没有则为空，前端回退原名）
+    pub zh_hant: Option<String>,
+    /// 匹配到的游戏库官方名（英文原名）；来源名不是目标语言时用它兜底
+    pub official_name: Option<String>,
     pub page_url: String,
     pub updated_at: Option<String>,
     /// 最新包的选项数（如 Plus.44 → 44）
@@ -118,6 +122,9 @@ pub struct TrainerHit {
     pub download_count: Option<u64>,
     /// 附件总数（该游戏可用的包数量）
     pub total_downloads: usize,
+    /// true = 只靠「重制/增强」类后缀兜底匹配上的，版本可能不同，建议界面提示
+    #[serde(default)]
+    pub edition_fallback: bool,
 }
 
 impl TrainerHit {
@@ -128,6 +135,8 @@ impl TrainerHit {
             id: entry.id.clone(),
             game_name: entry.game_name.clone(),
             zh_name: entry.zh_name.clone(),
+            zh_hant: None,
+            official_name: None,
             page_url: entry.page_url.clone(),
             updated_at: entry.updated_at.clone(),
             options_count: latest.and_then(|d| d.options_count),
@@ -139,6 +148,7 @@ impl TrainerHit {
             size_bytes: latest.and_then(|d| d.size_bytes),
             download_count: latest.and_then(|d| d.download_count),
             total_downloads: entry.downloads.len(),
+            edition_fallback: false,
         }
     }
 
@@ -146,6 +156,22 @@ impl TrainerHit {
     pub fn with_zh_fallback(mut self, zh: Option<String>) -> Self {
         if self.zh_name.is_none() {
             self.zh_name = zh;
+        }
+        self
+    }
+
+    /// 繁体名回填（只来自游戏库，不覆盖已有值）
+    pub fn with_zh_hant_fallback(mut self, hant: Option<String>) -> Self {
+        if self.zh_hant.is_none() {
+            self.zh_hant = hant;
+        }
+        self
+    }
+
+    /// 记下匹配到的游戏库官方名（英文原名），供"来源名不是目标语言"时兜底
+    pub fn with_official_name(mut self, name: Option<String>) -> Self {
+        if self.official_name.is_none() {
+            self.official_name = name;
         }
         self
     }
@@ -237,6 +263,11 @@ pub fn normalize_name(text: &str) -> String {
         }
         if c.is_ascii_alphabetic() || is_cjk_ideograph(c) {
             out.extend(c.to_lowercase());
+        } else if let Some(base) = fold_diacritics(c) {
+            // 带变音符的拉丁字母折叠成 ASCII 基字母（ö→o）。
+            // 旧行为是把非 ASCII 字母直接丢弃：Ragnarök 归一化成 ragnarrk，
+            // 与 fling 的 Ragnarok（ragnarok）永远对不上，修改器拿不到官方中文名。
+            out.push_str(&base.to_lowercase());
         }
     }
     if !digits.is_empty() {
@@ -253,6 +284,135 @@ fn is_cjk_ideograph(c: char) -> bool {
     )
 }
 
+/// 拉丁变音折叠：把带变音符的拉丁字母映射为 ASCII 基字母（ö→o、é→e、ß→ss）。
+/// 覆盖 Latin-1 Supplement、Latin Extended-A、Latin Extended-Additional，
+/// 以及 NFD 不分解的约定等价（ø、đ、ł、ŧ、ħ、æ、œ、ß）。
+/// 表由 Python `unicodedata`（NFD 分解取基字母）生成，勿手工增删单条。
+fn fold_diacritics(c: char) -> Option<&'static str> {
+    Some(match c {
+        'À' | 'Á' | 'Â' | 'Ã' | 'Ä' | 'Å' | 'Ā' | 'Ă' | 'Ą' | 'Ḁ' | 'Ạ' | 'Ả' | 'Ấ' | 'Ầ' | 'Ẩ' | 'Ẫ' | 'Ậ' | 'Ắ' | 'Ằ' | 'Ẳ' | 'Ẵ' | 'Ặ' => "A",
+        'Æ' => "AE",
+        'Ḃ' | 'Ḅ' | 'Ḇ' => "B",
+        'Ç' | 'Ć' | 'Ĉ' | 'Ċ' | 'Č' | 'Ḉ' => "C",
+        'Ď' | 'Đ' | 'Ḋ' | 'Ḍ' | 'Ḏ' | 'Ḑ' | 'Ḓ' => "D",
+        'È' | 'É' | 'Ê' | 'Ë' | 'Ē' | 'Ĕ' | 'Ė' | 'Ę' | 'Ě' | 'Ḕ' | 'Ḗ' | 'Ḙ' | 'Ḛ' | 'Ḝ' | 'Ẹ' | 'Ẻ' | 'Ẽ' | 'Ế' | 'Ề' | 'Ể' | 'Ễ' | 'Ệ' => "E",
+        'Ḟ' => "F",
+        'Ĝ' | 'Ğ' | 'Ġ' | 'Ģ' | 'Ḡ' => "G",
+        'Ĥ' | 'Ħ' | 'Ḣ' | 'Ḥ' | 'Ḧ' | 'Ḩ' | 'Ḫ' => "H",
+        'Ì' | 'Í' | 'Î' | 'Ï' | 'Ĩ' | 'Ī' | 'Ĭ' | 'Į' | 'İ' | 'Ḭ' | 'Ḯ' | 'Ỉ' | 'Ị' => "I",
+        'Ĵ' => "J",
+        'Ķ' | 'Ḱ' | 'Ḳ' | 'Ḵ' => "K",
+        'Ĺ' | 'Ļ' | 'Ľ' | 'Ł' | 'Ḷ' | 'Ḹ' | 'Ḻ' | 'Ḽ' => "L",
+        'Ḿ' | 'Ṁ' | 'Ṃ' => "M",
+        'Ñ' | 'Ń' | 'Ņ' | 'Ň' | 'Ṅ' | 'Ṇ' | 'Ṉ' | 'Ṋ' => "N",
+        'Ò' | 'Ó' | 'Ô' | 'Õ' | 'Ö' | 'Ø' | 'Ō' | 'Ŏ' | 'Ő' | 'Ṍ' | 'Ṏ' | 'Ṑ' | 'Ṓ' | 'Ọ' | 'Ỏ' | 'Ố' | 'Ồ' | 'Ổ' | 'Ỗ' | 'Ộ' | 'Ớ' | 'Ờ' | 'Ở' | 'Ỡ' | 'Ợ' => "O",
+        'Œ' => "OE",
+        'Ṕ' | 'Ṗ' => "P",
+        'Ŕ' | 'Ŗ' | 'Ř' | 'Ṙ' | 'Ṛ' | 'Ṝ' | 'Ṟ' => "R",
+        'Ś' | 'Ŝ' | 'Ş' | 'Š' | 'Ṡ' | 'Ṣ' | 'Ṥ' | 'Ṧ' | 'Ṩ' => "S",
+        'Ţ' | 'Ť' | 'Ŧ' | 'Ṫ' | 'Ṭ' | 'Ṯ' | 'Ṱ' => "T",
+        'Ù' | 'Ú' | 'Û' | 'Ü' | 'Ũ' | 'Ū' | 'Ŭ' | 'Ů' | 'Ű' | 'Ų' | 'Ṳ' | 'Ṵ' | 'Ṷ' | 'Ṹ' | 'Ṻ' | 'Ụ' | 'Ủ' | 'Ứ' | 'Ừ' | 'Ử' | 'Ữ' | 'Ự' => "U",
+        'Ṽ' | 'Ṿ' => "V",
+        'Ŵ' | 'Ẁ' | 'Ẃ' | 'Ẅ' | 'Ẇ' | 'Ẉ' => "W",
+        'Ẋ' | 'Ẍ' => "X",
+        'Ý' | 'Ŷ' | 'Ÿ' | 'Ẏ' | 'Ỳ' | 'Ỵ' | 'Ỷ' | 'Ỹ' => "Y",
+        'Ź' | 'Ż' | 'Ž' | 'Ẑ' | 'Ẓ' | 'Ẕ' => "Z",
+        'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' | 'ā' | 'ă' | 'ą' | 'ḁ' | 'ạ' | 'ả' | 'ấ' | 'ầ' | 'ẩ' | 'ẫ' | 'ậ' | 'ắ' | 'ằ' | 'ẳ' | 'ẵ' | 'ặ' => "a",
+        'æ' => "ae",
+        'ḃ' | 'ḅ' | 'ḇ' => "b",
+        'ç' | 'ć' | 'ĉ' | 'ċ' | 'č' | 'ḉ' => "c",
+        'ď' | 'đ' | 'ḋ' | 'ḍ' | 'ḏ' | 'ḑ' | 'ḓ' => "d",
+        'è' | 'é' | 'ê' | 'ë' | 'ē' | 'ĕ' | 'ė' | 'ę' | 'ě' | 'ḕ' | 'ḗ' | 'ḙ' | 'ḛ' | 'ḝ' | 'ẹ' | 'ẻ' | 'ẽ' | 'ế' | 'ề' | 'ể' | 'ễ' | 'ệ' => "e",
+        'ḟ' => "f",
+        'ĝ' | 'ğ' | 'ġ' | 'ģ' | 'ḡ' => "g",
+        'ĥ' | 'ħ' | 'ḣ' | 'ḥ' | 'ḧ' | 'ḩ' | 'ḫ' | 'ẖ' => "h",
+        'ì' | 'í' | 'î' | 'ï' | 'ĩ' | 'ī' | 'ĭ' | 'į' | 'ḭ' | 'ḯ' | 'ỉ' | 'ị' => "i",
+        'ĵ' => "j",
+        'ķ' | 'ḱ' | 'ḳ' | 'ḵ' => "k",
+        'ĺ' | 'ļ' | 'ľ' | 'ł' | 'ḷ' | 'ḹ' | 'ḻ' | 'ḽ' => "l",
+        'ḿ' | 'ṁ' | 'ṃ' => "m",
+        'ñ' | 'ń' | 'ņ' | 'ň' | 'ṅ' | 'ṇ' | 'ṉ' | 'ṋ' => "n",
+        'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ø' | 'ō' | 'ŏ' | 'ő' | 'ṍ' | 'ṏ' | 'ṑ' | 'ṓ' | 'ọ' | 'ỏ' | 'ố' | 'ồ' | 'ổ' | 'ỗ' | 'ộ' | 'ớ' | 'ờ' | 'ở' | 'ỡ' | 'ợ' => "o",
+        'œ' => "oe",
+        'ṕ' | 'ṗ' => "p",
+        'ŕ' | 'ŗ' | 'ř' | 'ṙ' | 'ṛ' | 'ṝ' | 'ṟ' => "r",
+        'ś' | 'ŝ' | 'ş' | 'š' | 'ṡ' | 'ṣ' | 'ṥ' | 'ṧ' | 'ṩ' => "s",
+        'ß' => "ss",
+        'ţ' | 'ť' | 'ŧ' | 'ṫ' | 'ṭ' | 'ṯ' | 'ṱ' | 'ẗ' => "t",
+        'ù' | 'ú' | 'û' | 'ü' | 'ũ' | 'ū' | 'ŭ' | 'ů' | 'ű' | 'ų' | 'ṳ' | 'ṵ' | 'ṷ' | 'ṹ' | 'ṻ' | 'ụ' | 'ủ' | 'ứ' | 'ừ' | 'ử' | 'ữ' | 'ự' => "u",
+        'ṽ' | 'ṿ' => "v",
+        'ŵ' | 'ẁ' | 'ẃ' | 'ẅ' | 'ẇ' | 'ẉ' | 'ẘ' => "w",
+        'ẋ' | 'ẍ' => "x",
+        'ý' | 'ÿ' | 'ŷ' | 'ẏ' | 'ẙ' | 'ỳ' | 'ỵ' | 'ỷ' | 'ỹ' => "y",
+        'ź' | 'ż' | 'ž' | 'ẑ' | 'ẓ' | 'ẕ' => "z",
+        _ => return None,
+    })
+}
+
+/// 版本后缀 · **可靠档**：同一套程序加内容（DLC/季票），修改器通常通用。
+///
+/// 顺序很重要：多词的放前面，先剥长的（`completeedition` 先于 `complete`）。
+const EDITION_SUFFIXES_SAFE: &[&str] = &[
+    "gameoftheyearedition",
+    "digitaldeluxeedition",
+    "collectorsedition",
+    "anniversaryedition",
+    "definitiveedition",
+    "legendaryedition",
+    "completeedition",
+    "ultimateedition",
+    "enhancededition",
+    "specialedition",
+    "deluxeedition",
+    "goldedition",
+    "gotyedition",
+    "reignofsand",
+];
+
+/// 版本后缀 · **兜底档**：重新编译过的另一个程序（重制/导演剪辑/增强），
+/// 原版修改器很可能注入失败。只在可靠档完全没命中时才采用，并标记 `edition_fallback`。
+const EDITION_SUFFIXES_FALLBACK: &[&str] = &[
+    "directorscut",
+    "remastered",
+    "enhanced",
+    "complete",
+    "ultimate",
+    "deluxe",
+];
+
+/// 剥掉结尾的版本后缀。`list` 决定用哪一档（可靠 / 兜底 / 两者）。
+fn strip_with<'a>(normalized: &'a str, list: &[&str]) -> &'a str {
+    let mut current = normalized;
+    'outer: loop {
+        for suffix in list {
+            if let Some(head) = current.strip_suffix(suffix) {
+                if head.chars().count() >= 4 {
+                    current = head;
+                    continue 'outer;
+                }
+            }
+        }
+        return current;
+    }
+}
+
+/// 剥掉结尾的版本后缀（两档合并），只用于**匹配比较**，不改显示名。
+/// 剩余部分不足 4 个字符就停手，避免把 `Deluxe` 这种就是名字本身的标题剥成空。
+pub fn strip_edition_suffix(normalized: &str) -> &str {
+    let once = strip_with(normalized, EDITION_SUFFIXES_SAFE);
+    strip_with(once, EDITION_SUFFIXES_FALLBACK)
+}
+
+/// 只剥可靠档（内容包类）
+fn strip_safe(normalized: &str) -> &str {
+    strip_with(normalized, EDITION_SUFFIXES_SAFE)
+}
+
+/// 只剥兜底档（重制/增强类）
+fn strip_fallback(normalized: &str) -> &str {
+    strip_with(normalized, EDITION_SUFFIXES_FALLBACK)
+}
+
 // ======================================================================
 // 中文名索引（游戏库 title → zh_CN 回填）
 // ======================================================================
@@ -261,28 +421,52 @@ fn is_cjk_ideograph(c: char) -> bool {
 /// 检索时给条目回填 zhName，也让中文输入能命中目录条目。
 pub struct ZhNameIndex {
     map: HashMap<String, String>,
+    /// 归一化英文名 → 官方繁体名（繁体界面用，缺省为空）
+    hant: HashMap<String, String>,
 }
 
 impl ZhNameIndex {
     pub fn build<I: IntoIterator<Item = (String, Option<String>)>>(rows: I) -> Self {
+        Self::build_full(rows.into_iter().map(|(t, z)| (t, z, None)))
+    }
+
+    /// 同时建立简中与繁中两条索引
+    pub fn build_full<I: IntoIterator<Item = (String, Option<String>, Option<String>)>>(
+        rows: I,
+    ) -> Self {
         let mut map = HashMap::new();
-        for (title, zh) in rows {
-            let Some(zh) = zh else { continue };
-            if zh.trim().is_empty() {
-                continue;
+        let mut hant = HashMap::new();
+        for (title, zh, h) in rows {
+            let key = normalize_name(&title);
+            if let Some(zh) = zh {
+                if !zh.trim().is_empty() {
+                    map.entry(key.clone()).or_insert(zh);
+                }
             }
-            map.entry(normalize_name(&title)).or_insert(zh);
+            if let Some(h) = h {
+                if !h.trim().is_empty() {
+                    hant.entry(key).or_insert(h);
+                }
+            }
         }
-        ZhNameIndex { map }
+        ZhNameIndex { map, hant }
     }
 
     pub fn empty() -> Self {
-        ZhNameIndex { map: HashMap::new() }
+        ZhNameIndex {
+            map: HashMap::new(),
+            hant: HashMap::new(),
+        }
     }
 
     /// 游戏英文名 → 游戏库中文名（精确归一化匹配）
     pub fn get(&self, game_name: &str) -> Option<&str> {
         self.map.get(&normalize_name(game_name)).map(String::as_str)
+    }
+
+    /// 游戏英文名 → 官方繁体名
+    pub fn get_hant(&self, game_name: &str) -> Option<&str> {
+        self.hant.get(&normalize_name(game_name)).map(String::as_str)
     }
 
     pub fn len(&self) -> usize {
@@ -442,12 +626,22 @@ impl TrainerRegistry {
     /// 关键词检索全部来源。语义：
     /// - 归一化后做子串匹配（英文名、别名 + 已解析的中文名），
     ///   外加缩写 / 拼音桥接 / 模糊纠错三类召回（见 fuzzy.rs）
-    /// - 归一化后不足 2 个字符的关键词一律无结果（防泛匹配刷屏）
+    /// - 归一化后不足 2 个字符的关键词一律无结果（防泛匹配刷屏）；
+    ///   例外：单个 CJK 字符放行（中文名高度特异，"黑""仙"这类单字命中率低且是有用前缀）
     /// - 按相关度降序返回（全等 > 前缀 > 子串 > 缩写 > 拼音 > 模糊），
     ///   同分保持来源内名称序；先全量评分再截断，避免限量截掉高分结果
     pub fn search(&self, query: &str, zh: &ZhNameIndex, limit: usize) -> Vec<TrainerHit> {
         let matcher = fuzzy::QueryMatcher::new(query);
-        if matcher.normalized_chars() < 2 {
+        // 单个 ASCII 字符仍拒绝（子串命中会刷屏）；单个 CJK 字符放行：
+        // 中文名高度特异（"黑"→黑神话悟空），且 CJK 字符集远大于 ASCII，
+        // 泛匹配风险低。normalized_chars 数的是字符不是字节，CJK 单字 = 1。
+        let is_single_cjk = matcher.normalized_chars() == 1
+            && matcher
+                .normalized()
+                .chars()
+                .next()
+                .is_some_and(crate::trainers::is_cjk_ideograph);
+        if matcher.normalized_chars() < 2 && !is_single_cjk {
             return Vec::new();
         }
         let mut scored: Vec<(f64, TrainerHit)> = Vec::new();
@@ -469,7 +663,11 @@ impl TrainerRegistry {
                 if let Some(s) = score {
                     scored.push((
                         s,
-                        TrainerHit::from_entry(&source.info().id, entry).with_zh_fallback(zh_name),
+                        TrainerHit::from_entry(&source.info().id, entry)
+                            .with_zh_fallback(zh_name)
+                            .with_zh_hant_fallback(
+                                zh.get_hant(&entry.game_name).map(String::from),
+                            ),
                     ));
                 }
             }
@@ -495,6 +693,7 @@ impl TrainerRegistry {
                 let n_title = normalize_name(title);
                 let n_game_zh = game_zh.as_deref().map(normalize_name);
                 let mut matches = Vec::new();
+                let mut soft_matches = Vec::new();
                 for source in &self.sources {
                     for entry in source.entries() {
                         // 显示用原始中文名；比较用归一化文本
@@ -503,21 +702,48 @@ impl TrainerRegistry {
                             .clone()
                             .or_else(|| zh.get(&entry.game_name).map(String::from));
                         let trainer_zh_norm = trainer_zh_display.as_deref().map(normalize_name);
-                        let en_hit = normalize_name(&entry.game_name) == n_title
+                        let entry_name = normalize_name(&entry.game_name);
+                        let zh_hit = matches!( (&trainer_zh_norm, &n_game_zh),
+                            (Some(a), Some(b)) if !b.is_empty() && a == b );
+                        // 全等（或命中别名）
+                        let exact = entry_name == n_title
                             || entry
                                 .aliases
                                 .iter()
                                 .any(|a| normalize_name(a) == n_title);
-                        let zh_hit = matches!( (&trainer_zh_norm, &n_game_zh),
-                            (Some(a), Some(b)) if !b.is_empty() && a == b );
-                        if en_hit || zh_hit {
+                        // 可靠档：只差内容包后缀（Complete / Ultimate / GOTY / Reign of Sand …）
+                        let safe_hit = !exact
+                            && strip_safe(&entry_name) == strip_safe(&n_title);
+                        // 兜底档：只差重制类后缀（Remastered / Director's Cut / Enhanced …）
+                        let soft_hit = !exact
+                            && !safe_hit
+                            && strip_fallback(&entry_name) == strip_fallback(&n_title);
+
+                        if exact || safe_hit || zh_hit {
                             matches.push(
-                                TrainerHit::from_entry(&source.info().id, entry).with_zh_fallback(
-                                    trainer_zh_display.or_else(|| game_zh.clone()),
-                                ),
+                                TrainerHit::from_entry(&source.info().id, entry)
+                                    .with_zh_fallback(
+                                        trainer_zh_display.or_else(|| game_zh.clone()),
+                                    )
+                                    .with_zh_hant_fallback(
+                                        zh.get_hant(&entry.game_name).map(String::from),
+                                    ),
                             );
+                        } else if soft_hit {
+                            let mut hit = TrainerHit::from_entry(&source.info().id, entry)
+                                .with_zh_fallback(trainer_zh_display.or_else(|| game_zh.clone()))
+                                .with_zh_hant_fallback(
+                                    zh.get_hant(&entry.game_name).map(String::from),
+                                );
+                            hit.edition_fallback = true;
+                            soft_matches.push(hit);
                         }
                     }
+                }
+                // 兜底档只在可靠档完全没命中时才采用：宁可少匹配，也不让重制版的修改器
+                // 冒充原版。采用时条目带 edition_fallback 标记，前端可以提示"版本可能不同"。
+                if matches.is_empty() {
+                    matches = soft_matches;
                 }
                 GameTrainerMatch {
                     title: title.clone(),
@@ -594,6 +820,97 @@ mod tests {
         assert_eq!(normalize_name("黑神话：悟空"), "黑神话悟空");
     }
 
+    #[test]
+    fn diacritics_fold_to_ascii_base() {
+        // fling 把 Ragnarök ASCII 化成 Ragnarok，游戏库保留 ö；
+        // 旧逻辑把 ö 丢弃 → ragnarrk ≠ ragnarok，修改器匹配不到游戏、拿不到官方中文名。
+        assert_eq!(normalize_name("God of War Ragnarök"), normalize_name("God of War Ragnarok"));
+        assert_eq!(normalize_name("God of War Ragnarök"), "godofwarragnarok");
+        assert_eq!(normalize_name("Pokémon"), normalize_name("Pokemon"));
+        assert_eq!(normalize_name("Café"), "cafe");
+        assert_eq!(normalize_name("Brütal Legend"), normalize_name("Brutal Legend"));
+        assert_eq!(normalize_name("Æon Flux"), normalize_name("Aeon Flux"));
+        assert_eq!(normalize_name("Façade"), "facade");
+        assert_eq!(normalize_name("Motörhead"), "motorhead");
+        // 大小写无关：大写变音字母同样折叠
+        assert_eq!(normalize_name("WARRIORS OF RAGNARÖK"), normalize_name("Warriors of Ragnarok"));
+    }
+
+    #[test]
+    #[ignore = "读真实数据库与目录，手动跑：cargo test -p gm-core match_report -- --ignored --nocapture"]
+    fn match_report_against_real_data() {
+        use std::collections::HashSet;
+
+        let src_tau = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let trainers_dir = src_tau.join("resources").join("trainers");
+        let db_path = src_tau.join("resources").join("database.db");
+
+        let (registry, errors) = TrainerRegistry::load_dir(&trainers_dir);
+        if !errors.is_empty() {
+            println!("加载告警: {errors:?}");
+        }
+        let db = crate::database::Database::open_readonly(&db_path).expect("打开数据库失败");
+        let games = db.title_zh_pairs().expect("读取游戏列表失败");
+        let zh = ZhNameIndex::build(games.iter().cloned());
+
+        let matched = registry.match_games(&zh, &games);
+        let with_hit = matched.iter().filter(|m| !m.matches.is_empty()).count();
+        let total_hits: usize = matched.iter().map(|m| m.matches.len()).sum();
+        let soft: usize = matched
+            .iter()
+            .flat_map(|m| m.matches.iter())
+            .filter(|h| h.edition_fallback)
+            .count();
+
+        // 目录侧覆盖率：有多少条修改器至少挂上了一款游戏
+        let mut attached: HashSet<(String, String)> = HashSet::new();
+        for m in &matched {
+            for h in &m.matches {
+                attached.insert((h.source_id.clone(), h.id.clone()));
+            }
+        }
+        let all_entries: usize = registry.sources.iter().map(|s| s.entries().len()).sum();
+
+        println!("游戏总数            {}", games.len());
+        println!("有修改器的游戏      {with_hit}");
+        println!("命中条目总数        {total_hits}（其中兜底档 {soft}）");
+        println!("目录条目总数        {all_entries}");
+        println!("已挂到游戏的条目    {}", attached.len());
+        println!("未挂到任何游戏的    {}", all_entries - attached.len());
+    }
+
+    #[test]
+    fn strip_edition_suffix_handles_official_titles() {
+        // Steam 官方名带版本后缀，修改器目录用原始名 —— 剥掉后应当相等
+        assert_eq!(
+            strip_edition_suffix(&normalize_name("Atlas Fallen: Reign Of Sand")),
+            strip_edition_suffix(&normalize_name("Atlas Fallen"))
+        );
+        assert_eq!(
+            strip_edition_suffix(&normalize_name("Godfall Ultimate Edition")),
+            strip_edition_suffix(&normalize_name("Godfall"))
+        );
+        assert_eq!(
+            strip_edition_suffix(&normalize_name("Chernobylite Complete Edition")),
+            strip_edition_suffix(&normalize_name("Chernobylite"))
+        );
+        assert_eq!(
+            strip_edition_suffix(&normalize_name("Grand Theft Auto V Enhanced")),
+            strip_edition_suffix(&normalize_name("Grand Theft Auto V"))
+        );
+        // 不能误伤：这是两款不同游戏
+        assert_ne!(
+            strip_edition_suffix(&normalize_name("DOOM Eternal")),
+            strip_edition_suffix(&normalize_name("DOOM"))
+        );
+        assert_ne!(
+            strip_edition_suffix(&normalize_name("HITMAN 2: Silent Assassin")),
+            strip_edition_suffix(&normalize_name("HITMAN 2"))
+        );
+        // 剩余太短则不剥（防止 Deluxe 这类本身就是名字）
+        assert_eq!(strip_edition_suffix("deluxe"), "deluxe");
+    }
+
     /// 造一个最小 TrainerHit 用于去重测试
     fn hit(source: &str, name: &str) -> TrainerHit {
         TrainerHit {
@@ -601,6 +918,8 @@ mod tests {
             id: format!("{source}/x"),
             game_name: name.into(),
             zh_name: None,
+            zh_hant: None,
+            official_name: None,
             page_url: String::new(),
             updated_at: None,
             options_count: None,
@@ -610,6 +929,7 @@ mod tests {
             size_bytes: None,
             download_count: None,
             total_downloads: 0,
+            edition_fallback: false,
         }
     }
 
@@ -738,6 +1058,22 @@ mod tests {
 
         // 检索：别名也参与子串匹配
         assert_eq!(reg.search("monster hunter: world", &zh, 50).len(), 1);
+    }
+
+    #[test]
+    fn single_cjk_query_passes_gate() {
+        // 戢翎 2026-11-03：搜"黑"要能出黑神话悟空（单 CJK 字符不再被最短长度拒绝）
+        let reg = registry();
+        let idx = zh_index();
+        let hits = reg.search("黑", &idx, 20);
+        assert!(
+            hits.iter().any(|h| h.game_name.to_lowercase().contains("black myth")),
+            "单字「黑」应命中 Black Myth: Wukong，实际: {:?}",
+            hits.iter().map(|h| &h.game_name).collect::<Vec<_>>()
+        );
+        // 单个 ASCII 字符仍应被拒绝（防泛匹配）
+        let hits_a = reg.search("z", &idx, 20);
+        assert!(hits_a.is_empty(), "单 ASCII 字符应无结果");
     }
 
     #[test]

@@ -333,7 +333,16 @@ fn ensure_not_cancelled(cancel: &AtomicBool) -> Result<(), String> {
 fn list_installed_trainers(
     state: tauri::State<AppState>,
 ) -> Vec<gm_core::trainers::install::InstalledTrainer> {
-    gm_core::trainers::install::scan_installed(&trainers_root(&state))
+    let mut list = gm_core::trainers::install::scan_installed(&trainers_root(&state));
+    // manifest 是安装那一刻的名字快照，不含繁体名；这里按游戏库现查补上，
+    // 让"已安装"列表与检索/匹配列表走同一套命名规则（旧 manifest 无需重装）。
+    let zh = state.trainer_zh.read().expect("trainer_zh 锁");
+    for t in &mut list {
+        t.zh_name_resolved = zh.get(&t.manifest.meta.game_name).map(String::from);
+        t.zh_hant_resolved = zh.get_hant(&t.manifest.meta.game_name).map(String::from);
+    }
+    drop(zh);
+    list
 }
 
 /// 读取 Windows「设置 → 网络和 Internet → 代理」里的系统代理。
@@ -665,6 +674,9 @@ fn download_and_install_blocking(
         Ok(gm_core::trainers::install::InstalledTrainer {
             manifest: outcome.manifest,
             folder: outcome.folder.to_string_lossy().to_string(),
+            // 新装的直接用安装时的名字；两语言回填由 list 命令统一做
+            zh_name_resolved: None,
+            zh_hant_resolved: None,
         })
     })();
 
@@ -1313,8 +1325,8 @@ async fn update_save_database(app: tauri::AppHandle) -> Result<SaveDatabaseInfo,
         // 热切换当前数据库 + 重建修改器中文名索引
         *lock_or_recover(&state.db_path) = target.clone();
         let zh = gm_core::database::Database::open_readonly(&target)
-            .and_then(|db| db.title_zh_pairs())
-            .map(gm_core::trainers::ZhNameIndex::build)
+            .and_then(|db| db.title_names())
+            .map(gm_core::trainers::ZhNameIndex::build_full)
             .unwrap_or_else(|e| {
                 eprintln!("[database] 中文名索引重建失败: {e}");
                 gm_core::trainers::ZhNameIndex::empty()
@@ -1953,8 +1965,8 @@ pub fn run() {
                 eprintln!("[trainers] {e}");
             }
             let trainer_zh = gm_core::database::Database::open_readonly(&db_path)
-                .and_then(|db| db.title_zh_pairs())
-                .map(gm_core::trainers::ZhNameIndex::build)
+                .and_then(|db| db.title_names())
+                .map(gm_core::trainers::ZhNameIndex::build_full)
                 .unwrap_or_else(|e| {
                     eprintln!("[trainers] 中文名索引构建失败: {e}");
                     gm_core::trainers::ZhNameIndex::empty()

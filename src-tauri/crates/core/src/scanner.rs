@@ -749,6 +749,7 @@ mod tests {
             gog_id: None,
             platforms: vec!["Steam".into()],
             zh_cn: None,
+            zh_hant: None,
             paths: SaveLocations {
                 // {{p|game}} = install_path（库根目录下的 CoolGame）
                 win: vec!["{{p|game}}\\saves\\*.sav".into()],
@@ -874,6 +875,7 @@ mod tests {
             gog_id: None,
             platforms: vec!["Steam".into()],
             zh_cn: None,
+            zh_hant: None,
             paths: SaveLocations {
                 win: vec!["{{p|game}}\\saves\\*.sav".into()],
                 reg: vec![],

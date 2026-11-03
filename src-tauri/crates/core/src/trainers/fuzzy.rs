@@ -143,6 +143,11 @@ impl QueryMatcher {
         self.normalized.chars().count()
     }
 
+    /// 归一化后的查询文本（供调用方判断字符类别，如单 CJK 字符放行）
+    pub fn normalized(&self) -> &str {
+        &self.normalized
+    }
+
     /// 目标（英文名 + 可选中文名）的命中相关度；None = 未命中。
     /// 数值只用于排序（越大越靠前），分档保证：
     /// 全等 > 前缀 > 子串 > 缩写 > 拼音桥接 > 模糊纠错——
