@@ -58,3 +58,6 @@ database.db-wal
 
 # 数据库走 Release 资产分发（254 MB 超 GitHub 100 MB 单文件上限）
 src-tauri/resources/database.db
+
+# 内部文档：只在本地，不进公开仓库
+docs/项目演进-0.1到0.5.html
