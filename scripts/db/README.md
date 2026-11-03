@@ -35,30 +35,10 @@ name_sources(pcgw_id, source, name, status, checked_at)  -- 名字来源留痕
 | 英文名 / 中文名 | Steam 官方 API、小黑盒 | 本项目脚本（`scripts/zh-names/`） |
 | ~~人工整理中文名~~ | ~~上游作者~~ | **不使用** |
 
-## 更新流程（重跑 PCGW 采集后）
+## 更新流程
 
-采集器与构建器位于旧 fork 目录（那里有 sqlite3 依赖与采集缓存，**不要删除**）：
-
-```bash
-cd ../Game-Save-Manager
-node scripts/incremental-sync.cjs --since <上次时间>
-node scripts/sync-pcgamingwiki.js          # 产出 database/database.new.db（旧结构）
-```
-
-**构建器产出的仍是旧结构，必须转换后再放进 resources**，否则 gm-core 读不到列：
-
-```bash
-cd ../Game-Manage-Center
-python scripts/db/migrate_schema.py \
-    --db  ../Game-Save-Manager/database/database.new.db \
-    --out src-tauri/resources/database.db
-cargo test -p gm-core        # 在 src-tauri 下跑，确认读取正常
-```
-
-脚本行为：
-- 输入是旧结构 → 完整迁移（含 `install_dir` 重算、`name_zh` 保留、`name_sources` 一并搬）
-- 输入已是新结构 → 直接跳过，不会破坏数据
-- 迁移前自动备份到 `.workbuddy/database-backups/database-before-schema-migration-*.db`
+PCGamingWiki增量同步工具位于本仓库的`scripts/pcgw/`，中间结果由`apply_pcgw_delta.py`合并。合并前备份目标库，先使用`--dry-run`审阅变更；覆盖安装目录、平台与路径须显式选择对应参数。
+`migrate_schema.py`仅用于导入历史结构，不需要旧fork目录。完整响应和本机维护状态不进入发布数据库。
 
 ## 中文名补采
 
@@ -71,7 +51,7 @@ cargo test -p gm-core        # 在 src-tauri 下跑，确认读取正常
 
 小黑盒采集、库外补采及本机调度工具由维护者在本地保存，不随公开源码分发。
 
-中文名优先级是 **小黑盒 > 官方**（戢翎 2026-10-29 定）。Steam 官方名常带英文括注与
+中文名优先级是 **小黑盒 > 官方**。Steam 官方名常带英文括注与
 书名号（「斗技场的阿利娜 Alina of the Arena」「《神力科莎EVO》 Assetto Corsa EVO」），
 小黑盒是国内玩家习惯的简洁叫法。
 
