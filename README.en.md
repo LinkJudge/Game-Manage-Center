@@ -19,15 +19,13 @@
 
 ---
 
-> This page describes the development branch. Schema validation, Traditional Chinese search, 30 s stall detection and UI error isolation are post-release fixes, not included in the original v0.5.0 installer. See each Release for shipped behavior.
-
 Game saves live in the registry, `AppData`, `Documents` and each game's install folder — and too often
 get deleted along with the game. This tool puts "find saves → back up → restore" and
 "find trainer → download → launch" into a single window.
 
-A self-collected catalog of **52,202 games**, with **15,266 entries** containing save/config path templates, a three-source trainer catalog
+A self-collected save-path library covering **52,202 games**, a three-source trainer catalog
 (**FLiNG + archive + XiaoXing**, 1,284 entries), and game names in **Simplified Chinese / Traditional
-Chinese / English**. The v0.5.0 installer is about **10.2 MiB**.
+Chinese / English**. The installer is only about **10 MB**.
 
 ## Features
 
@@ -51,17 +49,17 @@ Chinese / English**. The v0.5.0 installer is about **10.2 MiB**.
 |---|---|
 | **Catalog search** | Search in English / Chinese / Traditional Chinese; substring / abbreviation / pinyin bridging / fuzzy correction, ranked by relevance |
 | **Linked matching** | Lists available trainers for every scanned, installed game |
-| **Download & install** | Response length preferred, catalog estimate as fallback; 30 s without data fails the download; length/extraction checks; cancellation while waiting for the network, or after extraction returns; two-level "game / package" layout, no half-finished installs on failure |
+| **Download & install** | Measured progress (denominator from the actual response), 30 s stall detection, integrity checks, cancellable; two-level "game / package" layout, no half-finished installs on failure |
 | **Installed manager** | Launch (automatic UAC elevation), open folder, delete, in-place update (new package first, then old removed) |
 | **Multiple sources** | FLiNG main site 765 + archive 464 + XiaoXing 55 — **1,284 entries**; multiple sources collapse into one row |
-| **Naming rules** | Shows the source's original name, falling back to the catalog's translated name when needed |
+| **Naming rules** | Shows the source's original name, falling back to the official game name when needed |
 | **Leftover detection** | Trainers whose games are gone are grouped separately for one-click cleanup |
 | **Defender assistant** | One click to whitelist the trainer folder |
 
 ### <img src="public/icons/mod.svg" width="28" height="28" align="texttop" alt=""> MOD Management
 
 The entry point shipped in v0.5.0; features are planned (install, version management and conflict
-resolution).
+resolution in v0.6).
 
 ### <img src="public/icons/settings.svg" width="28" height="28" align="texttop" alt=""> Settings & Updates
 
@@ -70,7 +68,7 @@ resolution).
 | **App updates** | Every launch / 7 days / 30 days / never |
 | **Database update** | In-app download of the latest database asset (`gm-database.db`) from Releases, verified then atomically replaced |
 | **Catalog update** | Online trainer-catalog update, replaced only after full verification |
-| **Three languages** | Simplified Chinese / Traditional Chinese / English, applied instantly; game-name fallback: Simplified → Traditional → English in Simplified mode; Traditional → English in Traditional mode; English in English mode |
+| **Three languages** | Simplified Chinese / Traditional Chinese / English, applied instantly; game names follow the same fallback (Simplified → Traditional → English) |
 | **Visuals** | Glass title bar, colored feature icons plus outline icons that adapt to the light/dark theme |
 
 ### <img src="public/icons/extensions.svg" width="28" height="28" align="texttop" alt=""> Extensions
@@ -87,26 +85,24 @@ resolution).
 
 The installer bundles the v0.5 snapshot database (52k+ games). You can also download
 [`gm-database.db`](https://github.com/LinkJudge/Game-Manage-Center/releases/download/v0.5.0/gm-database.db)
-for source builds. The installed app downloads the asset directly from Releases through "Settings → Saves".
+separately and apply it from "Settings → Saves".
 
 **From source**:
 
 ```bash
-npm ci
-curl.exe -fL -o src-tauri/resources/database.db https://github.com/LinkJudge/Game-Manage-Center/releases/latest/download/gm-database.db
-python scripts/db/make_release_db.py --check
+npm install
 npm run tauri dev      # development
 npm run tauri build    # NSIS installer
 ```
 
-Requires Node 20.19+ (20.x) or 22.12+, Rust stable, Visual Studio Build Tools (C++ desktop workload), and Python 3.10+ for database checks/maintenance.
+Requires Node 20+, Rust stable and Visual Studio Build Tools (C++ desktop workload).
 
 ## Tech stack
 
 | Layer | Technology |
 |---|---|
 | Desktop | Tauri 2 |
-| Engine | Rust — `gm-core` crate, UI-independent and unit-tested; workspace tests also cover the command layer |
+| Engine | Rust — `gm-core` crate, UI-independent, unit-tested (120+ cases) |
 | Frontend | React 19 + TypeScript + Tailwind 4 |
 | Components | Radix UI (shadcn-style) |
 | Data | SQLite (52,202 games, self-collected pipeline: PCGamingWiki / Steam / XiaoHeiHe) |

@@ -45,10 +45,9 @@ import urllib.error
 import urllib.request
 from datetime import datetime
 from pathlib import Path
-from collection_state import validate_target
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_DB = ROOT / "scripts" / "pcgw" / "database" / "gmc-dev-full.db"
+DEFAULT_DB = ROOT / "src-tauri" / "resources" / "database.db"
 DEFAULT_HOT = ROOT.parent / ".workbuddy" / "steam-topsellers.json"
 
 UA = (
@@ -179,7 +178,6 @@ def main() -> int:
     parser.add_argument("--retry-errors", action="store_true", help="重跑上一轮网络失败的条目")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
-    args.db = validate_target(args.db)
 
     if not args.db.exists():
         print(f"[错误] 找不到数据库：{args.db}")

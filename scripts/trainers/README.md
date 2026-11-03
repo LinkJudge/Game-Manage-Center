@@ -101,7 +101,7 @@ https://github.com/LinkJudge/Game-Manage-Center/releases/latest/download/gm-trai
 
 1. `node scripts/trainers/fling-catalog.cjs --refresh-age 3`（增量刷新缓存并重建）
 2. 把生成的 `src-tauri/resources/trainers/fling.json` 改名为
-   **gm-trainers-fling.json**，作为附件上传到 Game-Manage-Center 仓库的最新 Release
+   **gm-trainers-fling.json**，作为附件上传到 Game-Manager 仓库的最新 Release
    （或专设一个 catalog Release 并保持其为 latest）
 3. 应用内点「更新目录」即拉到新版；下载内容先经引擎完整校验（schema/来源/条目
    不变式），校验不通过不会落盘，正在使用的目录不受影响

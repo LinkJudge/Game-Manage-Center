@@ -13,7 +13,7 @@
 1. **会话化**：CookieJar 维持会话，先访问首页与搜索页热身，再打接口
 2. **完整浏览器头**：Accept / Accept-Language / Sec-Fetch-* / sec-ch-ua / DNT，
    Referer 带上具体游戏页而非裸域名
-3. **随机节奏**：默认 2.2~5.5 秒随机间隔；每 26~48 个请求插入 40~110 秒长停顿
+3. **随机节奏**：默认 3.5~8.5 秒随机间隔；每 20~38 个请求插入 45~150 秒长停顿
 4. **打散顺序**：默认随机洗牌，不再按标题字母序列出请求
 5. **单次预算**：--budget 限制本轮请求数（默认 60），到量即优雅退出
 6. **早熔断**：**首个 403/429 立即中止**（v1 是连续 6 次），并写下冷却标记，
@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import gzip
+import gzip
 import json
 import random
 import re
@@ -49,7 +50,6 @@ import zlib
 from datetime import datetime, timedelta
 from http.cookiejar import CookieJar
 from pathlib import Path
-from collection_state import BudgetExceeded, DAILY_LIMIT, daily_usage, ensure_raw, preflight, reserve_request, single_collector, validate_target
 
 # 控制台编码兜底：计划任务/无 PYTHONUTF8 环境下 stdout 默认是 GBK，
 # 碰到游戏名里的 ™ ® 会直接 UnicodeEncodeError 崩掉（2026-11-02 实测）。
@@ -60,7 +60,7 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_DB = ROOT / "scripts" / "pcgw" / "database" / "gmc-dev-full.db"
+DEFAULT_DB = ROOT / "src-tauri" / "resources" / "database.db"
 BACKUP_DIR = ROOT.parent / ".workbuddy" / "database-backups"
 BLOCK_MARKER = ROOT.parent / ".workbuddy" / "zh-names-blocked.json"
 API = "https://api.xiaoheihe.cn/game/web/get_game_detail/"
@@ -115,10 +115,7 @@ class Session:
     """带 Cookie 的会话 + 拟人节奏。"""
 
     def __init__(self, min_delay: float, max_delay: float, pause_every: tuple[int, int],
-                 pause_range: tuple[float, float], use_proxy: bool = False, budget_db: Path | None = None) -> None:
-        if use_proxy:
-            raise ValueError("小黑盒采集只允许直连")
-        self.budget_db = budget_db or DEFAULT_DB
+                 pause_range: tuple[float, float], use_proxy: bool = False) -> None:
         self.jar = CookieJar()
         handlers: list = [urllib.request.HTTPCookieProcessor(self.jar)]
         if not use_proxy:
@@ -150,7 +147,6 @@ class Session:
     # ---------- 请求 ----------
 
     def _open(self, url: str, headers: dict[str, str], timeout: int) -> bytes:
-        reserve_request(self.budget_db)
         request = urllib.request.Request(url, headers=headers)
         try:
             with self.opener.open(request, timeout=timeout) as response:
@@ -179,14 +175,14 @@ class Session:
                      "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Site": "none"},
                     timeout=20,
                 )
-            except (Blocked, BudgetExceeded):
+            except Blocked:
                 raise
             except Exception:  # noqa: BLE001 - 热身失败不致命
                 pass
             time.sleep(random.uniform(1.5, 3.5))
 
     def fetch_name(self, appid: str, timeout: int = 20) -> tuple[str | None, str | None, dict | None]:
-        """返回 (主标题, 原英文标题, 完整result对象)。小黑盒主标题不一定是中文，英文标题单独在 name_en 字段。"""
+        """返回 (主标题, 原英文标题)。小黑盒主标题不一定是中文，英文标题单独在 name_en 字段。"""
         query = urllib.parse.urlencode(
             {"appid": appid, "_time": int(time.time()), "heybox_id": ""}
         )
@@ -290,7 +286,7 @@ def main() -> int:
     parser.add_argument("--db", type=Path, default=DEFAULT_DB)
     parser.add_argument("--limit", type=int, default=200, help="最多处理多少条记录；0 = 全部")
     parser.add_argument("--budget", type=int, default=60, help="本轮最多发多少个请求；0 = 不限")
-    parser.add_argument("--delay", type=float, default=None, help="固定间隔秒数（默认随机 2.2~5.5）")
+    parser.add_argument("--delay", type=float, default=None, help="固定间隔秒数（默认随机 3.5~8.5）")
     parser.add_argument("--min-delay", type=float, default=2.2)
     parser.add_argument("--max-delay", type=float, default=5.5)
     parser.add_argument("--pause-every", type=int, nargs=2, default=[26, 48],
@@ -311,14 +307,7 @@ def main() -> int:
     parser.add_argument("--record-all", action="store_true", help="连已有中文名的游戏也检查并记录来源")
     parser.add_argument("--dry-run", action="store_true", help="只预览，不写数据库")
     parser.add_argument("--no-backup", action="store_true")
-    parser.add_argument("--preflight", action="store_true", help="只读自检，不联网、不写库")
     args = parser.parse_args()
-    args.db = validate_target(args.db)
-    if args.preflight:
-        print(json.dumps(preflight(args.db), ensure_ascii=False, indent=2))
-        return 0
-    if args.use_proxy:
-        raise ValueError("小黑盒采集只允许直连")
 
     if not args.db.exists():
         print(f"[错误] 找不到数据库：{args.db}")
@@ -326,7 +315,7 @@ def main() -> int:
 
     # 冷却检查：上次被封过就别急着再试
     blocked_at = read_block_marker()
-    if blocked_at and not args.force and not args.dry_run:
+    if blocked_at and not args.force:
         wait_until = blocked_at + timedelta(hours=args.cooldown_hours)
         if datetime.now() < wait_until:
             print(
@@ -337,43 +326,37 @@ def main() -> int:
 
     # 允许和别的采集器并行：写锁冲突时排队等待，而不是立刻抛 database is locked
     # （2026-11-01：因为没有这个设置，Steam 采集一开就把本脚本打断过）
-    conn = sqlite3.connect(args.db.resolve().as_uri()+"?mode=ro", uri=True) if args.dry_run else sqlite3.connect(args.db, timeout=30)
+    conn = sqlite3.connect(args.db, timeout=30)
     conn.execute("PRAGMA busy_timeout = 30000")
     conn.row_factory = sqlite3.Row
-    if not args.dry_run:
-        if daily_usage(conn) >= DAILY_LIMIT:
-            raise BudgetExceeded("当天请求预算已耗尽，等待次日再采集")
-        ensure_raw(conn, "xiaoheihe")
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS name_sources (
-                pcgw_id    INTEGER NOT NULL,
-                source TEXT NOT NULL,
-                name TEXT,
-                status TEXT NOT NULL,
-                checked_at TEXT NOT NULL,
-                name_en TEXT,
-                PRIMARY KEY (pcgw_id, source)
-            )
-            """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS name_sources (
+            pcgw_id    INTEGER NOT NULL,
+            source TEXT NOT NULL,
+            name TEXT,
+            status TEXT NOT NULL,
+            checked_at TEXT NOT NULL,
+            name_en TEXT,
+            PRIMARY KEY (pcgw_id, source)
         )
-        # 老库补列：name_en 存小黑盒的「原英文标题」，主标题可能不是中文时用它当英文名
-        cols = {r[1] for r in conn.execute("PRAGMA table_info(name_sources)")}
-        has_name_en = "name_en" in cols
-        if not has_name_en:
-            try:
-                conn.execute("ALTER TABLE name_sources ADD COLUMN name_en TEXT")
-                conn.commit()
-                has_name_en = True
-                print("已为 name_sources 补上 name_en 列")
-            except sqlite3.OperationalError as error:
-                print(f"[警告] 补列失败（{error}），本次只写主标题")
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_name_sources_name ON name_sources(name)"
-        )
-        conn.commit()
-    else:
-        has_name_en = "name_en" in {r[1] for r in conn.execute("PRAGMA table_info(name_sources)")}
+        """
+    )
+    # 老库补列：name_en 存小黑盒的「原英文标题」，主标题可能不是中文时用它当英文名
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(name_sources)")}
+    has_name_en = "name_en" in cols
+    if not has_name_en:
+        try:
+            conn.execute("ALTER TABLE name_sources ADD COLUMN name_en TEXT")
+            conn.commit()
+            has_name_en = True
+            print("已为 name_sources 补上 name_en 列")
+        except sqlite3.OperationalError as error:
+            print(f"[警告] 补列失败（{error}），本次只写主标题")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_name_sources_name ON name_sources(name)"
+    )
+    conn.commit()
 
     extra_condition = "" if args.record_all else "AND (g.name_zh IS NULL OR trim(g.name_zh) = '')"
     rows = conn.execute(
@@ -422,11 +405,7 @@ def main() -> int:
     print(f"数据库：{args.db}")
     print(f"待处理：{len(rows)} 条（scope={args.scope}，本轮请求预算 {args.budget or '不限'}）")
     if args.dry_run:
-        print("[dry-run] 只预览，不联网、不写数据库")
-        for row in rows[:10]:
-            print(f"  {row['wiki_page_id']} {row['title']}")
-        conn.close()
-        return 0
+        print("[dry-run] 不写数据库")
     elif not args.no_backup:
         backup = backup_database(args.db)
         print(f"已备份数据库：{backup}")
@@ -438,15 +417,11 @@ def main() -> int:
         max_delay=max_delay,
         pause_every=tuple(args.pause_every),
         pause_range=tuple(args.pause_range),
-        use_proxy=False, budget_db=args.db,
+        use_proxy=args.use_proxy,
     )
     print("正在模拟浏览器访问站点（热身）……")
     try:
         session.warm_up()
-    except BudgetExceeded as error:
-        print(error)
-        conn.close()
-        return 4
     except Blocked as blocked:
         write_block_marker(str(blocked))
         print(f"[中止] 热身就被拦：{blocked}。已写下冷却标记，{args.cooldown_hours} 小时内重跑会被拒绝。")
@@ -530,10 +505,6 @@ def main() -> int:
             requests_made += 1
             try:
                 name, name_en, payload = session.fetch_name(appid)
-            except BudgetExceeded as error:
-                print(error)
-                exit_code = 4
-                break
             except Blocked as blocked:
                 write_block_marker(str(blocked))
                 print(f"[{index}/{len(rows)}] {row['title']} ({appid}) -> 触发风控：{blocked}")
@@ -623,13 +594,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    try:
-        if "--preflight" in sys.argv or "--dry-run" in sys.argv or "--help" in sys.argv:
-            code = main()
-        else:
-            with single_collector():
-                code = main()
-    except (RuntimeError, ValueError) as error:
-        print(f"[中止] {error}", file=sys.stderr)
-        code = 4
-    sys.exit(code)
+    sys.exit(main())

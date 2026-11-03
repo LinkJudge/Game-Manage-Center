@@ -18,10 +18,9 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from collection_state import collector_running, preflight
 
 ROOT = Path(__file__).resolve().parents[2]
-DB = ROOT / "scripts" / "pcgw" / "database" / "gmc-dev-full.db"
+DB = ROOT / "src-tauri" / "resources" / "database.db"
 STATE = ROOT.parent / ".workbuddy"
 
 
@@ -124,10 +123,7 @@ def main() -> int:
     finished = any("=== 全部结束" in ln or "EXIT_CODE=" in ln for ln in lines)
     triggered = any("触发了风控" in ln for ln in lines)
 
-    active = collector_running()
-    if active:
-        state, hint = "运行中", "采集进程持有独占锁"
-    elif triggered:
+    if triggered:
         state, hint = "风控熔断", "已被拦，等待冷却后再启动，别重试"
     elif finished:
         state, hint = "已结束", "本轮跑完了，可以起下一轮"
@@ -141,9 +137,6 @@ def main() -> int:
         state, hint = "疑似停止", "超过 30 分钟没落库，进程可能没了，需要重启"
 
     data = {
-        "database": str(DB),
-        "collector_active": active,
-        "preflight": preflight(DB),
         "checked_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "state": state,
         "hint": hint,

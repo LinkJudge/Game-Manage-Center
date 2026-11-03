@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { toast } from "sonner";
@@ -6,11 +6,10 @@ import { Copy, Minus, Settings as SettingsIcon, Square, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ActionTooltip, TooltipProvider } from "@/components/ui/tooltip";
-const BackupTab = lazy(() => import("@/backupTab").then(m => ({ default: m.BackupTab })));
-const TrainersTab = lazy(() => import("@/trainersTab").then(m => ({ default: m.TrainersTab })));
-const SettingsDialog = lazy(() => import("@/settingsDialog").then(m => ({ default: m.SettingsDialog })));
+import { BackupTab } from "@/backupTab";
+import { TrainersTab } from "@/trainersTab";
+import { SettingsDialog } from "@/settingsDialog";
 import { useScanStore, useUpdateStore } from "@/store";
-import { ErrorBoundary } from "@/components/errorBoundary";
 import { useI18n } from "@/i18n";
 
 function App() {
@@ -163,7 +162,7 @@ function App() {
           </div>
         </div>
 
-        <ErrorBoundary><Suspense fallback={null}><SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} /></Suspense></ErrorBoundary>
+        <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
 
         {/* 存档模块：备份、恢复与记录合并为同一游戏列表 */}
         <TabsContent
@@ -183,7 +182,7 @@ function App() {
             </div>
           </div>
           <div className="gm-scroll-area min-h-0 flex-1 overflow-y-auto px-7 pb-7 pt-3">
-            <ErrorBoundary><Suspense fallback={<div role="status" aria-busy="true" />}><BackupTab /></Suspense></ErrorBoundary>
+            <BackupTab />
           </div>
         </TabsContent>
 
@@ -205,7 +204,7 @@ function App() {
             </div>
           </div>
           <div className="gm-scroll-area min-h-0 flex-1 overflow-y-auto px-7 pb-7 pt-3">
-            <ErrorBoundary><Suspense fallback={<div role="status" aria-busy="true" />}><TrainersTab /></Suspense></ErrorBoundary>
+            <TrainersTab />
           </div>
         </TabsContent>
         {/* MOD 模块：先开放入口，内容待实现 */}

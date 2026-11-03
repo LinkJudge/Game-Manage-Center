@@ -15,19 +15,6 @@ export default defineConfig(() => ({
     },
   },
 
-  build: {
-    rolldownOptions: {
-      output: {
-        codeSplitting: {
-          groups: [{
-            name: "react-vendor",
-            test: /[\\/]node_modules[\\/](?:react|react-dom|scheduler)[\\/]/,
-            includeDependenciesRecursively: false,
-          }],
-        },
-      },
-    },
-  },
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors

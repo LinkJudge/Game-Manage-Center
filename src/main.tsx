@@ -2,7 +2,6 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
-import { ErrorBoundary } from "@/components/errorBoundary";
 import { Toaster } from "@/components/ui/sonner";
 import { ThemeProvider, applyThemeClass, storedThemeMode } from "@/theme";
 import "./index.css";
@@ -32,7 +31,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
-        <ErrorBoundary><App /></ErrorBoundary>
+        <App />
         <Toaster
           richColors
           position="bottom-right"

@@ -24,7 +24,7 @@ import sqlite3
 from clash_ctl import Clash
 
 ROOT = Path(__file__).resolve().parents[2]
-DB = ROOT / "scripts" / "pcgw" / "database" / "gmc-dev-full.db"
+DB = ROOT / "src-tauri" / "resources" / "database.db"
 PY = sys.executable
 GROUP = "🚀 节点选择"
 STEAM_URL = "https://store.steampowered.com/api/appdetails?appids=730&l=english&cc=us"

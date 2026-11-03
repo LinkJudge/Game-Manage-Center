@@ -30,11 +30,11 @@ import re
 import subprocess
 import sys
 import sqlite3
+import sys
 import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from collection_state import ensure_raw, validate_target
 
 import requests
 
@@ -47,7 +47,7 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 ROOT = Path(__file__).resolve().parents[2]
-DB = ROOT / "scripts" / "pcgw" / "database" / "gmc-dev-full.db"
+DB = ROOT / "src-tauri" / "resources" / "database.db"
 API = "https://store.steampowered.com/api/appdetails"
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36"
 CJK = re.compile(r"[\u4e00-\u9fff]")
@@ -68,8 +68,22 @@ _last_rotate = [0.0]
 
 
 def rotate_node() -> None:
-    """限流只退避，不修改用户共享代理路由。"""
-    print("Steam 限流：保持当前网络配置，等待退避。", flush=True)
+    """换到测速最快节点；60 秒内只换一次，避免所有线程同时打爆控制接口。"""
+    with _rotate_lock:
+        if time.time() - _last_rotate[0] < 60:
+            return
+        _last_rotate[0] = time.time()
+    script = Path(__file__).resolve().parent / "clash_ctl.py"
+    try:
+        subprocess.run(
+            [sys.executable, str(script), "pick",
+             "--group", "🚀 节点选择",
+             "--url", "https://store.steampowered.com/api/appdetails?appids=730&l=english&cc=us",
+             "--timeout", "3000"],
+            capture_output=True, timeout=180, check=False,
+        )
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def session() -> requests.Session:
@@ -146,7 +160,7 @@ def fetch(appid: str, lang: str, retries: int = 2, timeout: int = 20) -> dict | 
 
 
 def main() -> int:
-    global GAP, _proxies, DB
+    global GAP, _proxies
     ap = argparse.ArgumentParser(description="补齐 Steam 官方另一种语言的名字")
     ap.add_argument("--lang", choices=["english", "tchinese", "japanese"], required=True)
     ap.add_argument("--proxy", default="")
@@ -154,9 +168,7 @@ def main() -> int:
     ap.add_argument("--gap", type=float, default=0.8)
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--db", type=Path, default=DB)
     args = ap.parse_args()
-    DB = validate_target(args.db)
 
     GAP = max(0.1, args.gap)
     if args.proxy:
@@ -191,8 +203,6 @@ def main() -> int:
         conn.close()
         return 0
 
-    ensure_raw(conn, "steam")
-    conn.commit()
     started = time.time()
     buf: list[tuple[str, str]] = []
     raw_buf: list[tuple[str, bytes, str]] = []

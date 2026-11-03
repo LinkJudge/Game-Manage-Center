@@ -3,7 +3,7 @@ import re
 import sqlite3
 from pathlib import Path
 
-DB = Path(__file__).resolve().parents[2] / "scripts" / "pcgw" / "database" / "gmc-dev-full.db"
+DB = Path(__file__).resolve().parents[2] / "src-tauri" / "resources" / "database.db"
 
 CJK = re.compile(r"[\u4e00-\u9fff]")
 KANA = re.compile(r"[\u3040-\u30ff]")

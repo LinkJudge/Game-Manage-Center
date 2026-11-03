@@ -653,17 +653,10 @@ impl TrainerRegistry {
                     .map(String::from)
                     .or_else(|| zh.get(&entry.game_name).map(String::from));
                 let zh_disp = zh_name.as_deref();
-                let hant = zh.get_hant(&entry.game_name);
                 // 条目名与别名取最高相关度
                 let mut score = matcher.match_score(&entry.game_name, zh_disp);
-                if let Some(s) = matcher.match_score(&entry.game_name, hant) {
-                    score = Some(score.map_or(s, |b| b.max(s)));
-                }
                 for a in &entry.aliases {
                     if let Some(s) = matcher.match_score(a, zh_disp) {
-                        score = Some(score.map_or(s, |b| b.max(s)));
-                    }
-                    if let Some(s) = matcher.match_score(a, hant) {
                         score = Some(score.map_or(s, |b| b.max(s)));
                     }
                 }
@@ -990,21 +983,6 @@ mod tests {
         assert!(reg.search("", &ZhNameIndex::empty(), 50).is_empty());
         // 归一化后剩 1 个字符的符号串同样拒绝
         assert!(reg.search("!!", &ZhNameIndex::empty(), 50).is_empty());
-    }
-
-    #[test]
-    fn search_scores_traditional_names_before_filtering_and_limiting() {
-        let zh = ZhNameIndex::build_full(vec![(
-            "Elden Ring".to_string(), Some("艾尔登法环".to_string()),
-            Some("艾爾登法環".to_string()),
-        )]);
-        let reg = registry();
-        let hits = reg.search("艾爾登法環", &zh, 1);
-        assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].id, "fling/elden-ring-trainer");
-        assert_eq!(hits[0].zh_hant.as_deref(), Some("艾爾登法環"));
-        assert_eq!(reg.search("艾尔登法环", &zh, 1).len(), 1);
-        assert_eq!(reg.search("elden ring", &zh, 1).len(), 1);
     }
 
     #[test]

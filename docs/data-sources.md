@@ -1,84 +1,228 @@
 # 数据来源总表
 
-本文件描述当前数据快照与开发主线。数据为自建管道采集，数据来源的版权归属不因采集改变。统计日期：2026-11-03。
+本文档回答三个问题：**数据从哪来、用什么方法拿、存在哪里**。
 
-## 数据规模与口径
+维护原则：任何新增数据源或改变采集方式，都要同步更新这里。改动采集脚本时如果发现本文档与实际不符，以本文档为准去修脚本——不要反过来。
 
-| 项目 | 数量 | 含义 |
-|---|---:|---|
-| 游戏目录 | 52,202 | games 总条目，不能等同于都有存档路径 |
-| 含任一系统路径模板 | 15,266（29.24%） | win/reg/mac/linux 至少一个数组非空 |
-| 含 Windows 文件或注册表路径 | 15,137（29.00%） | win 或 reg 非空，尚不保证本机能解析命中 |
-| 简体名 | 13,724（26.3%） | games.name_zh 非空 |
-| 官方繁体名 | 2,362（4.5%） | games.name_zh_hant 非空，按繁简检测规则筛查 |
-| Steam 官方记录 | 49,095 | steam_names，含无中文/无商品等状态 |
-| 小黑盒记录 | 40,554 | name_sources 中 source=xiaoheihe，含查过但无名字 |
-| 库外名字 | 3,429 | extra_names，不算 games 游戏总数 |
-| 修改器目录 | 1,284 | 主站765 + 旧档464 + 小幸55；运行时去重前条目数 |
+---
 
-这些数字是快照。更新数据时用 SQLite 查询或 `python scripts/db/make_release_db.py --check` 核实；不以历史日志覆盖当前实测。
+## 一、总览
 
-## 存储与分发
+应用用到的数据分五类，来源互不重叠：
 
-| 文件 | 用途 |
+| 类别 | 数据源 | 写入表 | 规模 |
+|---|---|---|---|
+| 游戏目录（存档相关） | PCGamingWiki | `games` | 52,033 条 |
+| 中文名 | 小黑盒 | `name_sources` + `games.name_zh` | 10,000+ 次查询 |
+| 官方中文名 / 英文名 | Steam 商店 API | `steam_names` | 3,914 条 |
+| 库外官方名 | Steam 商店 API | `extra_names` | 3,429 条 |
+| 修改器目录 | 风灵月影 / 小幸 | `resources/trainers/*.json` | 1,274 条 |
+| 游戏封面 | Steam CDN / 本地缓存 / SteamGridDB | `<app_data>/GameArt` | 按需 |
+
+**Steam 榜单不产生游戏数据**，只用来决定「先采哪些游戏」，见第五节。
+
+---
+
+## 二、PCGamingWiki —— 游戏目录
+
+### 采什么
+
+| 字段 | 说明 |
 |---|---|
-| scripts/pcgw/database/gmc-dev-full.db | 开发全量库；采集与名字重建写入此库，保留完整原始响应 |
-| src-tauri/resources/database.db | 发布快照；用于应用内置与源码构建，裁去 raw 与请求记账表 |
-| AppData 下的 com.gamemanagecenter.app/database.db | 用户通过应用更新得到的运行库 |
+| `name_en` | 页面标题（MediaWiki `pg.title`） |
+| `install_dir` | 安装目录名 |
+| `steam_appid` / `gog_appid` | 商店 ID |
+| `save_paths` | 存档路径模板（`{{p|...}}` 占位符 + 注册表路径） |
+| `stores` | 支持的商店平台列表 |
 
-发布数据库不进 git，通过 Release 的 `gm-database.db` 分发。`make_release_db.py` 从全量库通过 SQLite backup 导出，验证计数、裁剪、保留输出旧副本后原子替换。它在发布副本中增加虚拟兼容列，使 0.3/0.4 使用旧列名的查询仍可读取；开发主表仍以 pcgw_id 和独立名称列为准。
+**不采**：wiki 正文、配置需求、截图、封面。只采存档相关的结构化字段。
 
-名字到达用户界面的链路：开发采集/重建 → 发布导出 → 打包或上传数据库资产 → 应用内更新。应用不会在后台运行采集器。
+### 怎么采
 
-## PCGamingWiki：目录与路径
+管道在 `scripts/pcgw/`（自建，与任何参考项目无关）：
 
-源头是 PCGamingWiki MediaWiki API，管道在 `scripts/pcgw/`。
-抽取页面 ID、标题、商店 ID、存档与配置路径、商店列表，不把 wiki 正文或图片用作应用内容。
+```
+MediaWiki API (action=query&prop=revisions)
+  → pcgw-extract.js       解析 wikitext，抽 {{Game data/saves|OS|路径}}
+  → sync-pcgamingwiki.js  合并旧库 → 产出 database/build-rows.json
+  → build_db.py           把行数据写成 database.new.db（Python，1 秒）
+  → apply_pcgw_delta.py   原地合并进 games 表（保护中文名）
+```
 
-增量入口 `incremental-sync.cjs` 读取 recentchanges；缓存支持断点续传，Cloudflare 挑战时停止，网络瞬时失败按脚本规则退避。
-`sync-pcgamingwiki.js` 与 `build_db.py` 生成中间库；`scripts/db/apply_pcgw_delta.py` 按 pcgw_id 合并到开发全量库，保护现有名字与采集明细。
-路径、安装目录等覆盖规则见脚本参数，不直接用中间库覆盖开发全量库。
+- 全量：枚举页面清单 → 分批取 wikitext → 解析
+- 增量：`incremental-sync.cjs --since <时间> --proxy <代理>` 走 recentchanges
+- **必须走代理**：直连 `pcgamingwiki.com` 返回 403（Cloudflare 挑战页），
+  本机实测 `--proxy http://127.0.0.1:7897` 才能通
+- 增量抓取支持断点续传（`incremental-done.json` 记录已完成 pageid），
+  网络抖动会重试 3 次，只有 403 / 非 JSON 才判定为 Cloudflare 挑战并立即退出
+- **写库不用 node-sqlite3**：它的 `db.run('BEGIN')` 只是入队、不保证先于
+  `stmt.run` 执行，事务开不起来，5.2 万条要跑十几分钟；Python 的
+  `executemany` 在一个事务里 1 秒完成
 
-历史页面枚举数量不能直接减去当前 games 数量推导漏抓：筛选、增量日期与来源均可能不同。路径覆盖率以路径数组实际非空为准。
+### 采集边界（重要）
 
-## Steam：官方名称
+- 全站枚举 **55,502 个页面，全部抓过**
+- 入库 **52,033 条**，差额 3,513 页在源站本身就没有 `Game data/saves` 模板，
+  不是漏抓（已逐条在缓存里核实）
+- 字段覆盖：`install_dir` 100%、`steam_appid` 94.4%、`gog_appid` 10.7%
+- **存档路径只有 29.2% 有值（15,219 条）**，其余 70.8% 源站就是空的。
+  这是众包站的性质决定的，补不了，除非自己人工维护
 
-按 AppID 请求商店 appdetails，简体、英文、繁体与日文通道分别处理；日文目前仅储备，不是已发布界面语言。
-中文通道取到中文时不能同时把该值写入英文列；英文通道过滤含汉字的返回值，避免污染 name_en。
+### 合并时的保护规则
 
-`steam_names` 保存本地化字段及查询状态；`steam_raw` 保存 gzip 压缩的完整返回 data 对象。raw 以 AppID 为键保留最新响应，不是所有语言的历史响应档案。
-历史上在 raw 机制加入前的请求没有完整原文，不能宣称全部历史请求均可追溯。
-429 时按脚本退避，不自动修改共享代理路由或节点。
+`apply_pcgw_delta.py` 默认**只同步低风险字段**（`name_en` / `steam_appid` / `gog_appid`）：
 
-Steam 榜单只用于采集优先级，不产生 games 条目；当前 Steam 记录已全库查询，不能再描述为“仅覆盖榜单内”。
+- `install_dir` / `stores` / `save_paths` 默认不覆盖。实测上游 `install_folder`
+  与我们的 `install_dir` 有 5,235 条不同，是两套推断规则打架
+  （上游 `123kickit`、我们 `1... 2... 3... KICK IT!`），没有一边绝对正确
+- 要覆盖必须显式加 `--update-install-dir` / `--update-stores` / `--update-save-paths`
+- **永远不碰 `name_zh`**，也不碰 `name_sources` / `steam_names` / `extra_names` 三张表
 
-## 小黑盒：来源名称
+---
 
-按 Steam AppID 取游戏详情，保存主标题与英文标题。中文列采用小黑盒优先策略，因此应称“游戏库译名”，不能一概称“官方译名”。
-`name_sources` 的 named/latin/no_name 都代表查过；待采查询使用 LEFT JOIN 判断没有来源记录，不能用 status IS NULL 代替。
+## 三、小黑盒 —— 中文名
 
-仅直连，随机2.2–5.5秒间隔、每26–48条长停40–110秒，调度器每批400、批间300秒。403/429立即熔断。
-主采集与库外补采共享操作系统文件锁和请求日预算；请求前持久化记账，失败请求和热身请求也计入。首次启用账本以既有当天记录作为保守基线。冷却到期不代表服务端已解封，必须按维护安排确认再启动。
-这些策略是降低请求频率的保护，不保证不会被限流。
+### 采什么
 
-完整响应保存在开发库 xhh_raw；库外响应使用 xhh_extra_raw。发布副本不包含这些 raw 表。gzip BLOB 必须先解压为 JSON，才能查询字段。
+按 **Steam AppID** 查游戏详情，取返回的 `result.name`。
 
-## 名称优先级与显示
+### 怎么采
 
-- 简体名称：小黑盒 > Steam 官方 > 现有有效值兜底；保留来源明细。
-- 英文主名：Steam 官方 > 小黑盒英文标题 > PCGW 标题；数据原样保存，变音折叠仅作用于匹配键。
-- 游戏显示：简体模式简→繁→英；繁体模式繁→英；英文模式英文，不显示中文副标题。
-- 修改器显示：来源原名优先；需要译名时用游戏库名称，繁体缺失时该模块会尝试简体。它与游戏列表的回退规则不同。
+- 接口：`api.xiaoheihe.cn/game/web/get_game_detail/?appid=<AppID>`
+- **直连，不走代理**（早期走海外代理更像爬虫，加重了风控）
+- 节奏：随机 3.5–8.5 秒间隔，每 20–38 个请求长停 45–150 秒
+- **首个 403 立即熔断**并写冷却标记（`.workbuddy/zh-names-blocked.json`，6 小时内拒绝重跑）
+- 分批调度用 `run_batches.py`：每批小、批间冷却、遇熔断停手
 
-## 修改器与封面
+### 判定规则
 
-风灵主站通过 `fling-catalog.cjs` 采集；旧档与小幸由 `build_extra_sources.py` 构建。数据保留全部来源，重复只在搜索/匹配阶段隐藏。小幸只打开外部下载页。
-目录在线更新目前分发的是主站 `gm-trainers-fling.json`，不意味着三份目录均在线刷新。
+| 返回 | `status` | 写入 |
+|---|---|---|
+| 含汉字且不同于英文名 | `named` | `games.name_zh`（仅当原值为空） |
+| 纯英文 / 与英文名相同 | `latin` | 只记来源，不写主名 |
+| 接口返回无名字 | `no_name` | 只记来源，下次跳过 |
 
-封面顺序：应用本地缓存/手选图 → Steam librarycache → Steam CDN → EXE 图标 → 字母块。手选图单独存放，普通缓存清理跳过它。
-SteamGridDB 使用用户自填 Key，保存于本机设置，图片来源受官方 CDN 白名单限制。
+**`name_sources` 是采集流水账**，`(pcgw_id, 'xiaoheihe')` 有记录就算查过，
+无论结果如何都不再重采 —— 这是「重复运行不会重采」的依据。
 
-## 已知边界
+### 已知限制
 
-小黑盒仍有7,546条待采；没有名字既可能是尚未查询，也可能是接口没有，不能都归因于源头缺失。
-无 Steam AppID 的条目不能按此接口查名。非空路径模板也可能失效，用户可用自定义游戏补充路径。
+- 只按 Steam AppID 查：**2,917 个无 `steam_appid` 的游戏采不到**（其中 85 个是多平台独占）
+- 同一游戏多平台不同译名：目前只存一条（Steam 版），表结构 `(pcgw_id, source)` 存不下多平台
+
+---
+
+## 四、Steam 商店 API —— 官方名
+
+### 采什么
+
+`api/appdetails?appids=<ID>&l=schinese&cc=cn` 返回的名字。
+
+### 判定规则
+
+| 情况 | `status` | `name_zh` | `name_en` |
+|---|---|---|---|
+| 返回含汉字 | `ok` | 中文名 | **NULL** |
+| 返回纯英文 | `en_only` | NULL | 英文名 |
+| `success=false` | `missing` | NULL | NULL |
+| 网络失败 | `error` | NULL | NULL |
+
+⚠️ **`ok` 时 `name_en` 必须是 NULL**。请求参数是 `l=schinese`，官方有中文时返回的就是中文，
+拿不到英文名。曾经这里填了中文，导致下游把中文当英文主名写进 `games.name_en`
+（污染 224 条，已回滚修复）。
+
+### 限速（实测）
+
+约 **1 条/秒**。4 线程 × 0.18 秒会立刻 429；2 线程 × 0.5 秒仍会；1 线程 × 0.9 秒偶尔撞。
+4.6 万个全量要 12 小时以上，所以只按榜单优先采。
+
+---
+
+## 五、Steam 榜单 —— 只决定顺序
+
+抓 `store.steampowered.com/search/results/`，得到 AppID 列表，存 `.workbuddy/steam-priority.json`。
+
+| 榜单 | 条数 |
+|---|---|
+| topsellers 热销 | 7,395 |
+| comingsoon 即将发售 | 14,495 |
+| newreleases 新品 | 5,974 |
+| specials 特惠 | 2,990 |
+| 合并去重 | 28,159 |
+
+**这些 AppID 不进数据库**，只在采集时用于过滤和排序。
+
+关键事实：这 28,159 个 AppID 里只有 **3,610 个（12.8%）** 在我们的库中
+——库来自 PCGamingWiki，新品/特惠榜里大量小游戏没有 wiki 页面。
+
+抓取必须走代理（`--proxy http://127.0.0.1:7897`），直连超时、沙箱代理 502。
+
+---
+
+## 六、修改器目录
+
+| 来源 | 采集方式 | 条数 |
+|---|---|---|
+| 风灵月影（主目录） | 自建爬虫 `fling-catalog.cjs` | 755 |
+| 风灵月影（旧档） | `build_extra_sources.py`，直链 RAR | 464 |
+| 小幸 | 官网/网盘页解析 | 55 |
+
+不实现绕过付费或授权补丁。小幸只提供官网与网盘页链接（`external=true`），
+应用内不代下载。
+
+---
+
+## 七、封面
+
+| 顺序 | 来源 | 说明 |
+|---|---|---|
+| 1 | 本地缓存 `<app_data>/GameArt` | 命中直接返回 |
+| 2 | Steam `appcache/librarycache` | 本机已装游戏 |
+| 3 | Steam CDN | 按 appid 拼 URL |
+| 4 | EXE 图标提取 | 兜底 |
+| 5 | 字母块 | 最终兜底 |
+
+手动换封面用 SteamGridDB（用户自填 API Key，存 `settings.json`），
+只允许其官方 CDN 图片，批量最多 40 个、600ms 限速。
+
+---
+
+## 八、中文名优先级
+
+**中文名：小黑盒 > Steam 官方 > 现有值兜底**
+**英文主名：Steam 官方优先，否则保留 PCGamingWiki 页面标题**
+
+理由：官方中文名常带英文括注与书名号（「斗技场的阿利娜 Alina of the Arena」），
+小黑盒是国内玩家习惯的简洁叫法。
+
+由 `scripts/zh-names/rebuild_names.py` 统一定夺，默认只出报告，`--apply` 才落库。
+
+⚠️ 该脚本不会把含汉字的值当作英文名（`name_en` 里有 617 条本来就是中文，
+因为国产游戏在 PCGamingWiki 的页面标题就是中文，不是脏数据）。
+
+---
+
+## 九、表结构职责
+
+| 表 | 职责 | 唯一键 |
+|---|---|---|
+| `games` | 游戏主表：目录信息 + 最终采用的中文名 | `pcgw_id` |
+| `name_sources` | 中文名采集流水账（含「查过但没有」） | `(pcgw_id, source)` |
+| `steam_names` | Steam 官方本地化原始结果 | `steam_appid` |
+| `extra_names` | PCGamingWiki 没有、Steam 有的游戏 | `steam_appid` |
+| `catalog_meta` | 目录元信息（同步时间、schema 版本） | `key` |
+
+**`pcgw_id` 是 PCGamingWiki 页面 ID（外部来源），`games.id` 才是我们自己的自增主键。**
+备份目录、名字来源全部挂在 `pcgw_id` 上。
+
+---
+
+## 十、当前缺口
+
+| 缺口 | 影响 |
+|---|---|
+| PCGamingWiki 数据过期（`synced_at` 见 `catalog_meta`） | 新游戏缺目录与存档路径 |
+| 70.8% 游戏源站无存档路径 | 扫不出存档位置，只能靠已安装检测兜底 |
+| 2,917 个无 Steam AppID 的游戏无中文名 | 界面上显示英文名 |
+| Steam 官方名只覆盖榜单内 | 榜外 4.5 万个只有小黑盒名或没有名 |
+| 多平台译名未区分 | 只取 Steam 版叫法 |
